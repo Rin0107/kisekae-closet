@@ -1,0 +1,7 @@
+# OSV-Scanner の設定 (CI の security ジョブが repo の根から自動で読む)
+# 無視は期限つき。期限が来たら直った版が出ているかを見て、出ていれば npm update し、この項目を消す。
+
+[[IgnoredVulns]]
+id = "GHSA-fc5q-39xc-vjpf"
+ignoreUntil = 2026-12-18T00:00:00Z
+reason = "picomatch (<= 4.0.7) の ReDoS。dev 依存 (vite・vitest) だけで本番の Worker・配る静的ファイルに入らない。glob を書くのは開発者だけ。直った版がまだない (2026-11-18 時点で最新 4.0.7)。npm audit --omit=dev は 0 件"
