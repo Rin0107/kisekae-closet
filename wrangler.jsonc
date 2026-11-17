@@ -15,6 +15,9 @@
   // パスキーは IP では使えないので、手元は localhost
   "vars": { "ORIGIN": "http://localhost:8787" },
   "observability": { "enabled": false },
+  // 本番の Worker は縮める。縮めないと依存 (@peculiar/asn1-cms) のクラス名 `RecipientEncryptedKeys_1 = class …` を
+  // gitleaks が鍵 (generic-api-key) と見て、wk deploy の push が止まる (ideas#33)
+  "minify": true,
   "workers_dev": true,
   "preview_urls": false,
 }

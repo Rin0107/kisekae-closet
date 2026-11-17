@@ -4,7 +4,7 @@ import globals from "globals";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: ["dist", ".wrangler", "node_modules", "playwright-report", "test-results"] },
+  { ignores: ["dist", "bundle", ".wrangler", "node_modules", "playwright-report", "test-results"] },
   js.configs.recommended,
   { files: ["scripts/**/*.mjs", "*.config.{js,ts}"], languageOptions: { globals: globals.node } },
   ...tseslint.configs.strict,
