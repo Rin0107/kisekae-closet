@@ -10,6 +10,7 @@
     "format": "prettier --write src tests scripts *.config.ts",
     "test": "sh scripts/limit.sh 2G 2 vitest run --coverage",
     "e2e": "sh scripts/limit.sh 3G 2 playwright test",
+    "shots": "SHOTS=1 npm run e2e -- closet",
     "guards": "node scripts/deps-guard.mjs && node scripts/data-guard.mjs && node scripts/egress-guard.mjs && node scripts/db-guard.mjs",
     "verify": "npm run lint && npm run typecheck && npm run test && npm run build && npm run guards",
     "verify-ship": "WK_SHIP=1 npm run verify",

@@ -9,7 +9,7 @@ const sw = vi.hoisted(() => ({
 }));
 vi.mock("@simplewebauthn/server", () => sw);
 
-import { MAX_BODY_BYTES, readJson } from "../../src/worker/api";
+import { latestDay, MAX_BODY_BYTES, readJson } from "../../src/worker/api";
 import { LIMITS } from "../../src/worker/db";
 import worker, { route, type Env } from "../../src/worker/index";
 import { fakeEnv } from "./fake-d1";
@@ -290,6 +290,36 @@ describe("服とコーデ", () => {
     expect((await call("PATCH", "/api/clothes/abc", { cookie, body: { kind: "outer" } })).res.status).toBe(
       404,
     );
+  });
+
+  test("AC-7-4: 先のコーデは今日 (Asia/Tokyo) から 15 日先まで。それより先はサーバーも 400 で拒む", async () => {
+    // NOW は 2027-01-15 17:00 (Asia/Tokyo)
+    expect(latestDay(NOW)).toBe("2027-01-30");
+    // 日本の真夜中で日が替わる
+    expect(latestDay(Date.UTC(2026, 10, 16, 15, 0, 0))).toBe("2026-12-02");
+    expect(latestDay(Date.UTC(2026, 10, 16, 14, 59, 59, 999))).toBe("2026-12-01");
+    const cookie = await signUp();
+    const id = (
+      await call("POST", "/api/clothes", { cookie, body: { kind: "top", warmth: 2, label: "", photo: JPEG } })
+    ).body.id as string;
+    const body = { itemIds: [id], tempMax: 10, tempMin: 5, humidity: 50, precip: 0 };
+    // ここからの API は本物の時計で動く。真夜中をまたがないよう、送る直前に決める
+    const last = latestDay(Date.now());
+    const next = new Date(Date.parse(last) + 86_400_000).toISOString().slice(0, 10);
+    for (const wornOn of [next, "2099-12-31"]) {
+      const r = await call("POST", "/api/outfits", { cookie, body: { ...body, wornOn } });
+      expect(r.res.status).toBe(400);
+      expect(r.body).toEqual({ error: "コーデを決めておけるのは 15 日先まで" });
+    }
+    expect((await call("POST", "/api/outfits", { cookie, body: { ...body, wornOn: last } })).res.status).toBe(
+      201,
+    );
+    // 過去の日はこれまでどおり置ける
+    expect(
+      (await call("POST", "/api/outfits", { cookie, body: { ...body, wornOn: "2020-01-01" } })).res.status,
+    ).toBe(201);
+    const list = (await call("GET", "/api/outfits", { cookie })).body.outfits as { wornOn: string }[];
+    expect(list.map((o) => o.wornOn).sort()).toEqual(["2020-01-01", last]);
   });
 
   test("コーデ: 日付・気温・湿度の形を確かめ、上下逆の気温・同じ服 2 回・空は拒む", async () => {

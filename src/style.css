@@ -7,7 +7,7 @@
   --c-text: #3d2a30;
   --c-muted: #7a5f67;
   --c-primary: #e86a8a;
-  --c-primary-strong: #c94a6c;
+  --c-primary-strong: #b53b5e;
   --c-on-primary: #ffffff;
   --c-primary-soft: #fbd3dd;
   --c-line: #f1d5dc;
@@ -603,4 +603,41 @@ input {
 }
 .wear-shoes {
   object-position: 50% 100%;
+}
+
+/* 先の日のコーデを決めているとき (今日の画面の上) */
+.plan-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-s);
+  background: var(--c-surface-2);
+}
+.plan-bar p {
+  margin: 0;
+}
+/* カレンダー: 先に決めておいた日 (白抜きのハート) */
+.day-stamp.plan {
+  color: var(--c-primary-strong);
+}
+
+/* テーマの見本 (クローゼットの下) */
+.themes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+.themes button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.swatch {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1px solid var(--c-line);
 }

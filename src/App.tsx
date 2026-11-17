@@ -20,7 +20,8 @@ import { login, register } from "./passkey";
 import { recommend } from "./recommend";
 import { shrinkPhoto } from "./shrink";
 import { load, save } from "./storage";
-import { CITIES, cityById, parseWeather, weatherUrl, type Weather } from "./weather";
+import { applyTheme, DEFAULT_THEME, ThemeId, themeById, THEMES } from "./theme";
+import { canPlan, CITIES, cityById, parseForecast, weatherUrl, type Weather } from "./weather";
 
 export const KIND_NAMES: Record<string, string> = {
   top: "トップス",
@@ -57,6 +58,7 @@ const nameOf = (c: Clothing) => c.label || (KIND_NAMES[c.kind] ?? "服");
 
 export function App() {
   const [state, setState] = useState<"loading" | "out" | "in">("loading");
+  useEffect(() => applyTheme(themeById(load("theme", ThemeId, DEFAULT_THEME))), []);
   useEffect(() => {
     api.me().then(
       () => setState("in"),
@@ -100,6 +102,7 @@ function Welcome({ onIn }: { onIn: () => void }) {
 }
 
 const City = z.string();
+const NO_FORECAST: ReadonlyMap<string, Weather> = new Map();
 type Tab = "today" | "closet" | "calendar";
 const TABS: { id: Tab; name: string }[] = [
   { id: "today", name: "今日" },
@@ -111,8 +114,11 @@ function Home({ onOut }: { onOut: () => void }) {
   const [clothes, setClothes] = useState<Clothing[]>([]);
   const [outfits, setOutfits] = useState<Outfit[]>([]);
   const [city, setCity] = useState(() => load("city", City, "tokyo"));
-  const [weather, setWeather] = useState<Weather | null>(null);
+  // どの市の予報か (日付 → 天気、今日を含めて 16 日) と、読めなかったか。市が変われば読み込み中
+  const [wx, setWx] = useState<{ city: string; days: Map<string, Weather> | "failed" } | null>(null);
   const [tab, setTab] = useState<Tab>("today");
+  // 着せ替えている日 (今日か、先に決めておく日)
+  const [plan, setPlan] = useState(() => today());
   // null: まだ触っていない (決めたコーデか、おすすめを着る)
   const [worn, setWorn] = useState<Clothing[] | null>(null);
   const [sparkle, setSparkle] = useState(0);
@@ -131,13 +137,28 @@ function Home({ onOut }: { onOut: () => void }) {
   useEffect(reload, [reload]);
   useEffect(() => {
     save("city", city);
+    // 前の市の答えが後から届いても使わない
+    let stale = false;
+    const set = (days: Map<string, Weather> | "failed") => {
+      if (!stale) setWx({ city, days });
+    };
     fetch(weatherUrl(cityById(city)))
-      .then((r) => r.json())
-      .then((b: unknown) => setWeather(parseWeather(b)))
-      .catch(() => setWeather(null));
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((b: unknown) => {
+        const days = parseForecast(b);
+        set(days.size === 0 ? "failed" : days);
+      })
+      .catch(() => set("failed"));
+    return () => {
+      stale = true;
+    };
   }, [city]);
+  const wxState = wx === null || wx.city !== city ? "loading" : wx.days === "failed" ? "failed" : "ok";
+  const forecast = wx !== null && wx.city === city && wx.days !== "failed" ? wx.days : NO_FORECAST;
 
-  const day = today();
+  const day = plan;
+  const isToday = plan === today();
+  const weather = forecast.get(plan) ?? null;
   const decided = outfits.find((o) => o.wornOn === day);
   const base =
     decided !== undefined
@@ -148,6 +169,10 @@ function Home({ onOut }: { onOut: () => void }) {
   // 消した服は着ていられない
   const current = (worn ?? base).filter((c) => clothes.some((x) => x.id === c.id));
 
+  const choose = (d: string) => {
+    setPlan(d);
+    setWorn(null);
+  };
   const put = (items: Clothing[]) => {
     setWorn(items);
     setSparkle((n) => n + 1);
@@ -178,6 +203,16 @@ function Home({ onOut }: { onOut: () => void }) {
       <main>
         {tab === "today" && (
           <section aria-label="今日" className="today">
+            {!isToday && (
+              <div className="plan-bar" data-testid="plan-bar">
+                <p>
+                  <strong>{md(plan)}</strong>のコーデを先に決めています (予報)
+                </p>
+                <button type="button" className="ghost" onClick={() => choose(today())}>
+                  今日に戻る
+                </button>
+              </div>
+            )}
             <header className="weather-bar">
               {weather ? (
                 <p className="weather">
@@ -186,8 +221,14 @@ function Home({ onOut }: { onOut: () => void }) {
                     {weather.tempMax}℃ / {weather.tempMin}℃・湿度 {weather.humidity}%・雨 {weather.precip}mm
                   </span>
                 </p>
+              ) : wxState === "failed" ? (
+                <p className="weather" role="alert" data-testid="weather-failed">
+                  天気を読めませんでした。市を選び直すか、あとで開き直してください
+                </p>
               ) : (
-                <p className="weather muted">天気を読んでいます…</p>
+                <p className="weather muted">
+                  {wxState === "loading" ? "天気を読んでいます…" : "この日の予報がありません"}
+                </p>
               )}
               <select className="city" value={city} onChange={(e) => setCity(e.target.value)} aria-label="市">
                 {CITIES.map((c) => (
@@ -204,6 +245,11 @@ function Home({ onOut }: { onOut: () => void }) {
               onWear={(c) => put(wear(current, c))}
               weather={weather}
               stamp={isDecided}
+              stampNote={
+                isToday
+                  ? "今日のコーデはカレンダーに載りました"
+                  : `${md(plan)}のコーデとしてカレンダーに載りました`
+              }
               onGoCloset={() => setTab("closet")}
               decide={
                 weather && current.length > 0 && !isDecided ? (
@@ -220,14 +266,22 @@ function Home({ onOut }: { onOut: () => void }) {
           <CalendarRoom
             clothes={clothes}
             outfits={outfits}
-            weather={weather}
+            today={today()}
+            weather={forecast.get(today()) ?? null}
+            forecast={forecast}
             onUse={(items) => {
+              choose(today());
               put(items);
+              setTab("today");
+            }}
+            onPlan={(d) => {
+              choose(d);
               setTab("today");
             }}
           />
         )}
         {error && <p role="alert">{error}</p>}
+        {tab === "closet" && <ThemePicker />}
         {tab === "closet" && (
           <footer className="account">
             <a href="/api/export" download="closet.json">
@@ -262,6 +316,33 @@ function Home({ onOut }: { onOut: () => void }) {
         ))}
       </nav>
     </div>
+  );
+}
+
+/** サイト全体の色を選ぶ。選んだものは端末にだけ覚える。 */
+function ThemePicker() {
+  const [id, setId] = useState(() => load("theme", ThemeId, DEFAULT_THEME));
+  const pick = (t: string) => {
+    setId(themeById(t).id as typeof id);
+    applyTheme(themeById(t));
+    save("theme", themeById(t).id);
+  };
+  return (
+    <section aria-label="テーマ" className="theme-room">
+      <h2>テーマ</h2>
+      <div className="themes" role="group" aria-label="テーマの色">
+        {THEMES.map((t) => (
+          <button key={t.id} type="button" aria-pressed={id === t.id} onClick={() => pick(t.id)}>
+            <span
+              className="swatch"
+              aria-hidden="true"
+              style={{ background: t.colors["--c-primary"], borderColor: t.colors["--c-primary-strong"] }}
+            />
+            {t.name}
+          </button>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -328,6 +409,7 @@ function Dresser({
   onWear,
   weather,
   stamp,
+  stampNote,
   decide,
   onGoCloset,
 }: {
@@ -337,6 +419,7 @@ function Dresser({
   onWear: (c: Clothing) => void;
   weather: Weather | null;
   stamp: boolean;
+  stampNote: string;
   decide: ReactNode;
   onGoCloset: () => void;
 }) {
@@ -393,7 +476,7 @@ function Dresser({
       {weather && <GaugeView worn={worn} weather={weather} />}
       <div className="decide-row">
         {decide}
-        {stamp && <p className="muted">今日のコーデはカレンダーに載りました</p>}
+        {stamp && <p className="muted">{stampNote}</p>}
       </div>
       <section aria-label="クローゼット" className="closet">
         <div role="tablist" aria-label="服の種類" className="shelves">
@@ -619,15 +702,20 @@ const md = (d: string) => `${Number(d.slice(5, 7))}月${Number(d.slice(8))}日`;
 function CalendarRoom({
   clothes,
   outfits,
+  today: day,
   weather,
+  forecast,
   onUse,
+  onPlan,
 }: {
   clothes: Clothing[];
   outfits: Outfit[];
+  today: string;
   weather: Weather | null;
+  forecast: ReadonlyMap<string, Weather>;
   onUse: (items: Clothing[]) => void;
+  onPlan: (day: string) => void;
 }) {
-  const day = today();
   const [ym, setYm] = useState(() => ({ year: Number(day.slice(0, 4)), month: Number(day.slice(5, 7)) }));
   const [picked, setPicked] = useState<string | null>(null);
   const byDay = new Map<string, Outfit>();
@@ -677,11 +765,12 @@ function CalendarRoom({
               {week.map((d, j) => {
                 if (d === null) return <td key={j} />;
                 const o = byDay.get(d);
-                const w = o ?? (d === day ? weather : null);
+                const w = o ?? forecast.get(d) ?? null;
+                const ahead = d > day;
                 const like = o && weather && d !== day ? likeness(weather, o) : undefined;
                 const words = [
                   `${md(d)}`,
-                  o ? "決めた日" : "",
+                  o ? (ahead ? "決めておいた日" : "決めた日") : "",
                   like && like !== "far" ? LIKENESS_NAMES[like] : "",
                 ];
                 return (
@@ -704,8 +793,12 @@ function CalendarRoom({
                         </span>
                       )}
                       {o && (
-                        <span className="day-stamp" data-testid="day-stamp" aria-hidden="true">
-                          ♥
+                        <span
+                          className={`day-stamp ${ahead ? "plan" : ""}`}
+                          data-testid={ahead ? "day-plan" : "day-stamp"}
+                          aria-hidden="true"
+                        >
+                          {ahead ? "♡" : "♥"}
                         </span>
                       )}
                     </button>
@@ -718,7 +811,20 @@ function CalendarRoom({
       </table>
       {picked !== null && (
         <div className="picked" data-testid="picked">
-          {chosen === undefined ? (
+          {chosen === undefined && picked > day ? (
+            canPlan(day, picked) ? (
+              <>
+                <p className="muted">{md(picked)}のコーデを、予報を見ながら先に決めておけます。</p>
+                <button type="button" className="primary" onClick={() => onPlan(picked)}>
+                  この日のコーデを決める
+                </button>
+              </>
+            ) : (
+              <p className="muted" data-testid="too-far">
+                {md(picked)}は先すぎて、まだ天気の予報がありません (15 日先まで決めておけます)。
+              </p>
+            )
+          ) : chosen === undefined ? (
             <p className="muted">{md(picked)}は、まだコーデを決めていません。</p>
           ) : (
             <>
@@ -729,14 +835,20 @@ function CalendarRoom({
                 <Stage worn={items} caption={`${md(picked)}のコーデ`} />
               </div>
               <LabelRow worn={items} />
-              <button
-                type="button"
-                className="primary"
-                disabled={items.length === 0}
-                onClick={() => onUse(items)}
-              >
-                この日のコーデにする
-              </button>
+              {picked >= day && canPlan(day, picked) ? (
+                <button type="button" className="primary" onClick={() => onPlan(picked)}>
+                  {picked === day ? "今日のコーデを着せ替える" : "この日のコーデを着せ替える"}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="primary"
+                  disabled={items.length === 0}
+                  onClick={() => onUse(items)}
+                >
+                  この日のコーデにする
+                </button>
+              )}
             </>
           )}
         </div>

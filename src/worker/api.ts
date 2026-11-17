@@ -41,6 +41,15 @@ export const NewOutfitInput = z
   .refine((o) => o.tempMin <= o.tempMax)
   .refine((o) => new Set(o.itemIds).size === o.itemIds.length);
 
+/** 先にコーデを決めておけるのは、今日 (Asia/Tokyo) から何日先まで。画面の canPlan (予報のある日) と同じ */
+export const MAX_DAYS_AHEAD = 15;
+const JST_MS = 9 * 3_600_000;
+
+/** コーデを置ける一番先の日 (YYYY-MM-DD)。今日 (Asia/Tokyo) の MAX_DAYS_AHEAD 日先。 */
+export function latestDay(now: number): string {
+  return new Date(now + JST_MS + MAX_DAYS_AHEAD * 86_400_000).toISOString().slice(0, 10);
+}
+
 export function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -126,6 +135,8 @@ export const ROUTES = new Map<string, Handler>(
     "POST outfits": async (c) => {
       const p = NewOutfitInput.safeParse(await readJson(c.req));
       if (!p.success) return bad("コーデの形が違う");
+      // YYYY-MM-DD どうしは文字の順が日付の順
+      if (p.data.wornOn > latestDay(c.now)) return bad(`コーデを決めておけるのは ${MAX_DAYS_AHEAD} 日先まで`);
       const id = randomId(16);
       const r = await c.store.addOutfit(c.userId, { id, ...p.data }, c.now);
       if (r === "limit") return bad(`コーデは ${LIMITS.outfits} 件まで`);

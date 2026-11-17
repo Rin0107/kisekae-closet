@@ -14,9 +14,15 @@ import { App, KIND_NAMES, shelfOf, today } from "../../src/App";
 type Handler = (method: string, body: unknown) => [number, unknown];
 let routes: Record<string, Handler>;
 let calls: string[];
+let weatherBody: unknown;
+
+// 日付は固定する (月のはじめでも「前の日」の見本が過去になるように)
+const DAY = "2026-11-17";
+const NOW = new Date(2026, 10, 17, 9, 0, 0);
 
 const WEATHER = {
   daily: {
+    time: [DAY],
     temperature_2m_max: [30],
     temperature_2m_min: [24],
     relative_humidity_2m_mean: [60],
@@ -45,7 +51,10 @@ const PAST = [
 ];
 
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(NOW);
   calls = [];
+  weatherBody = WEATHER;
   routes = {
     me: () => [200, { signedIn: true }],
     clothes: (m) => (m === "POST" ? [201, { id: "n" }] : [200, { clothes: CLOTHES }]),
@@ -57,7 +66,7 @@ beforeEach(() => {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string, init?: { method?: string; body?: string }) => {
-      if (url.startsWith("https://api.open-meteo.com/")) return new Response(JSON.stringify(WEATHER));
+      if (url.startsWith("https://api.open-meteo.com/")) return new Response(JSON.stringify(weatherBody));
       const path = url.replace("/api/", "");
       const m = init?.method ?? "GET";
       calls.push(`${m} ${path}${init?.body ? " " + init.body : ""}`);
@@ -69,6 +78,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.resetAllMocks();
   localStorage.clear();
@@ -299,8 +309,40 @@ describe("ログインのあと: 今日の画面", () => {
     await change(el.querySelector('select[aria-label="市"]'), "osaka");
     expect(localStorage.getItem("kisekae-closet:city")).toBe('"osaka"');
     expect(el.querySelector('[data-testid="weather"]')).toBeNull();
-    expect(el.textContent).toContain("天気を読んでいます");
+    expect(el.querySelector('[role="alert"][data-testid="weather-failed"]')?.textContent).toContain(
+      "天気を読めませんでした",
+    );
     expect(button(el, "これに決めた")).toBeUndefined();
+  });
+
+  test("天気: 読み込み中と、読めなかった (200 でない・形が違う) を分けて出す", async () => {
+    let release = () => {};
+    const api = vi.mocked(fetch).getMockImplementation() as typeof fetch;
+    vi.mocked(fetch).mockImplementation(async (url, init) => {
+      if (!String(url).startsWith("https://api.open-meteo.com/")) return api(url, init);
+      // 天気の答えを待たせる
+      await new Promise<void>((r) => (release = r));
+      return new Response(JSON.stringify(WEATHER));
+    });
+    const el = await render();
+    expect(el.textContent).toContain("天気を読んでいます…");
+    expect(el.querySelector('[role="alert"]')).toBeNull();
+    await act(async () => release());
+    await act(async () => {});
+    expect(el.querySelector('[data-testid="weather"]')).not.toBeNull();
+
+    for (const res of [
+      () => new Response("oops", { status: 503 }),
+      () => new Response(JSON.stringify({ daily: {} })),
+    ]) {
+      document.body.replaceChildren();
+      vi.mocked(fetch).mockImplementation(async (url, init) =>
+        String(url).startsWith("https://api.open-meteo.com/") ? res() : api(url, init),
+      );
+      const e = await render();
+      expect(e.querySelector('[data-testid="weather-failed"]')?.getAttribute("role")).toBe("alert");
+      expect(button(e, "これに決めた")).toBeUndefined();
+    }
   });
 
   test("服がなければ、しまうように案内してクローゼットへ", async () => {
@@ -459,7 +501,7 @@ describe("服をしまう", () => {
 });
 
 describe("カレンダー", () => {
-  const d = today();
+  const d = DAY;
   const other = `${d.slice(0, 8)}${d.slice(8) === "01" ? "02" : "01"}`;
   const far = `${d.slice(0, 8)}${d.slice(8) === "03" ? "04" : "03"}`;
   beforeEach(() => {
@@ -569,6 +611,177 @@ describe("カレンダー", () => {
     await click(el.querySelector('[aria-label="前の月"]'));
     await click(el.querySelector('[aria-label="前の月"]'));
     expect(el.querySelector(".month h2")?.textContent).toBe(m === 1 ? `${y - 1}年12月` : `${y}年${m - 1}月`);
+  });
+});
+
+describe("先の日のコーデを決めておく (#7)", () => {
+  const AHEAD = "2026-11-20"; // 3 日先
+  const LAST = "2026-12-02"; // 15 日先 (予報の最後の日)
+  const TOO_FAR = "2026-12-03"; // 16 日先
+  let saved: Record<string, unknown>[];
+  beforeEach(() => {
+    // 16 日分の予報。3 日先だけ寒い
+    const time = Array.from({ length: 16 }, (_, i) => {
+      const t = new Date(Date.UTC(2026, 10, 17 + i));
+      return t.toISOString().slice(0, 10);
+    });
+    weatherBody = {
+      daily: {
+        time,
+        temperature_2m_max: time.map((t) => (t === AHEAD ? 8 : 30)),
+        temperature_2m_min: time.map((t) => (t === AHEAD ? 2 : 24)),
+        relative_humidity_2m_mean: time.map(() => 60),
+        precipitation_sum: time.map((t) => (t === AHEAD ? 3 : 0)),
+      },
+    };
+    saved = [];
+    routes.outfits = (m, body) => {
+      if (m === "POST") {
+        saved.push({ id: `o${saved.length}`, ...(JSON.parse(body as string) as object) });
+        return [201, { id: `o${saved.length - 1}` }];
+      }
+      return [200, { outfits: saved }];
+    };
+  });
+
+  const openDay = async (el: HTMLElement, day: string) => {
+    await click(button(el, "カレンダー"));
+    if (day.slice(0, 7) !== DAY.slice(0, 7)) await click(el.querySelector('[aria-label="次の月"]'));
+    await click(el.querySelector(`[data-testid="day-${day}"]`));
+  };
+
+  test("AC-7-1: カレンダーで先の日を押すと、その日の予報と、それに合うおすすめを着たアバターが出る", async () => {
+    const el = await render();
+    await click(button(el, "カレンダー"));
+    const cell = el.querySelector(`[data-testid="day-${AHEAD}"]`) as HTMLElement;
+    expect(cell.querySelector('[data-testid="mini"]')?.textContent).toBe("8°60%");
+    await openDay(el, AHEAD);
+    expect(worn(el.querySelector('[data-testid="picked"]') as HTMLElement)).toEqual([]); // 押しただけでは替わらない
+    await click(button(el, "この日のコーデを決める"));
+    expect(el.querySelector('section[aria-label="今日"]')).not.toBeNull();
+    expect(el.querySelector('[data-testid="plan-bar"]')?.textContent).toContain("11月20日");
+    expect(el.querySelector('[data-testid="weather"]')?.textContent).toBe("8℃ / 2℃・湿度 60%・雨 3mm");
+    expect(el.querySelector('svg[aria-label="雨"]')).not.toBeNull();
+    // 寒い日のおすすめ (ニット・デニム・コート・スニーカー)。今日 (30℃) のおすすめとは違う
+    expect(worn(el)).toEqual(expect.arrayContaining(["ニット", "コート"]));
+    await click(button(el, "今日に戻る"));
+    expect(el.querySelector('[data-testid="plan-bar"]')).toBeNull();
+    expect(worn(el)).toEqual(["白T", "デニム", "スニーカー"]);
+  });
+
+  test("AC-7-1: 15 日先 (予報の最後の日) まで決めておける", async () => {
+    const el = await render();
+    await openDay(el, LAST);
+    expect(button(el, "この日のコーデを決める")).toBeDefined();
+  });
+
+  test("AC-7-2: 着せ替えて決めると、その日の分として保存され、カレンダーに「決めておいた」印が付く", async () => {
+    const el = await render();
+    await openDay(el, AHEAD);
+    await click(button(el, "この日のコーデを決める"));
+    await click(el.querySelector('button[aria-label="白Tを着る"]'));
+    await click(button(el, "これに決めた"));
+    expect(el.querySelector('[data-testid="stamp"]')).not.toBeNull();
+    expect(el.textContent).toContain("11月20日のコーデとしてカレンダーに載りました");
+    expect(saved).toHaveLength(1);
+    expect(saved[0]).toMatchObject({ wornOn: AHEAD, tempMax: 8, tempMin: 2, humidity: 60, precip: 3 });
+    expect(saved[0]?.itemIds).toContain("t1");
+    await click(button(el, "カレンダー"));
+    const cell = el.querySelector(`[data-testid="day-${AHEAD}"]`) as HTMLElement;
+    expect(cell.querySelector('[data-testid="day-plan"]')?.textContent).toBe("♡");
+    expect(cell.querySelector('[data-testid="day-stamp"]')).toBeNull();
+    expect(cell.getAttribute("aria-label")).toContain("決めておいた日");
+    // 決めておいた日を押すと、そのコーデが見え、着せ替え直せる
+    await click(cell);
+    expect(worn(el.querySelector('[data-testid="picked"]') as HTMLElement)).toContain("白T");
+    await click(button(el, "この日のコーデを着せ替える"));
+    expect(el.querySelector('[data-testid="plan-bar"]')?.textContent).toContain("11月20日");
+    expect(worn(el)).toContain("白T");
+    expect(el.querySelector('[data-testid="stamp"]')).not.toBeNull();
+  });
+
+  test("AC-7-3: 今日の分を先に決めておいたら、今日の画面はおすすめより先にそれを出す", async () => {
+    saved.push({
+      id: "p",
+      wornOn: DAY,
+      tempMax: 20,
+      tempMin: 10,
+      humidity: 50,
+      precip: 0,
+      itemIds: ["d1", "s1"],
+    });
+    const el = await render();
+    expect(el.querySelector('[data-testid="plan-bar"]')).toBeNull();
+    expect(worn(el)).toEqual(["スニーカー", "花柄"]);
+    expect(el.querySelector('[data-testid="stamp"]')).not.toBeNull();
+  });
+
+  test("AC-7-4: 送るのは日付・服・気温・湿度・降水量の数字だけ。16 日以上先は選べない", async () => {
+    const el = await render();
+    await openDay(el, AHEAD);
+    await click(button(el, "この日のコーデを決める"));
+    await click(button(el, "これに決めた"));
+    const post = calls.find((c) => c.startsWith("POST outfits ")) as string;
+    expect(Object.keys(JSON.parse(post.slice("POST outfits ".length)) as object).sort()).toEqual([
+      "humidity",
+      "itemIds",
+      "precip",
+      "tempMax",
+      "tempMin",
+      "wornOn",
+    ]);
+    expect(readFileSync("DATA.md", "utf8")).toContain("先の日");
+    await click(button(el, "今日に戻る"));
+    await openDay(el, TOO_FAR);
+    expect(el.querySelector('[data-testid="too-far"]')?.textContent).toContain("15 日先まで");
+    expect(button(el, "この日のコーデを決める")).toBeUndefined();
+  });
+
+  test("AC-7-5: 予報の読めない先の日は、天気の代わりにそう出し、決めるボタンを出さない", async () => {
+    weatherBody = WEATHER; // 今日の分しかない
+    const el = await render();
+    await openDay(el, AHEAD);
+    await click(button(el, "この日のコーデを決める"));
+    expect(el.textContent).toContain("この日の予報がありません");
+    expect(button(el, "これに決めた")).toBeUndefined();
+  });
+});
+
+describe("テーマ (#8)", () => {
+  test("AC-8-1: クローゼットの画面でテーマを選ぶと、全画面の色 (:root の変数) がすぐ変わる", async () => {
+    const el = await render();
+    const root = document.documentElement;
+    expect(root.dataset.theme).toBe("strawberry");
+    await click(button(el, "クローゼット"));
+    const group = el.querySelector('[aria-label="テーマの色"]') as HTMLElement;
+    expect([...group.querySelectorAll("button")].map((b) => b.textContent)).toEqual([
+      "いちごミルク",
+      "ミントソーダ",
+      "ラベンダー",
+      "ミルクティー",
+    ]);
+    await click(button(el, "ミントソーダ"));
+    expect(root.dataset.theme).toBe("mint");
+    expect(root.style.getPropertyValue("--c-primary-strong")).toBe("#2b7a62");
+    expect(button(el, "ミントソーダ")?.getAttribute("aria-pressed")).toBe("true");
+    expect(button(el, "いちごミルク")?.getAttribute("aria-pressed")).toBe("false");
+    // アバターの台の大きさはテーマで変えない
+    expect(root.style.getPropertyValue("--stage-w")).toBe("");
+  });
+
+  test("AC-8-2: 再読み込みしても選んだテーマのまま (壊れた値なら既定)", async () => {
+    localStorage.setItem("kisekae-closet:theme", JSON.stringify("lavender"));
+    await render();
+    expect(document.documentElement.dataset.theme).toBe("lavender");
+    document.body.replaceChildren();
+    localStorage.setItem("kisekae-closet:theme", JSON.stringify("<script>"));
+    await render();
+    expect(document.documentElement.dataset.theme).toBe("strawberry");
+  });
+
+  test("AC-8-4: DATA.md にテーマのキーが書かれている", () => {
+    const data = readFileSync("DATA.md", "utf8");
+    expect(data).toContain("`kisekae-closet:theme`");
   });
 });
 

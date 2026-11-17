@@ -1,6 +1,10 @@
 // 今日の天気。ブラウザが Open-Meteo (鍵の要らない公開 API) を直接読む。サーバーには場所を送らない (DATA.md)。
 // 場所は「市」を選ぶだけ (代表の緯度・経度。端末の localStorage に置く)。
+// 予報は今日を含めて 16 日分 (Open-Meteo の forecast_days の上限)。先の日のコーデを決めておくのに使う。
 import { z } from "zod";
+
+/** 予報のある日数 (今日を含む)。 */
+export const FORECAST_DAYS = 16;
 
 export interface City {
   id: string;
@@ -37,7 +41,7 @@ export function weatherUrl(c: City): string {
     longitude: String(c.lon),
     daily: "temperature_2m_max,temperature_2m_min,relative_humidity_2m_mean,precipitation_sum",
     timezone: "Asia/Tokyo",
-    forecast_days: "1",
+    forecast_days: String(FORECAST_DAYS),
   });
   return `https://api.open-meteo.com/v1/forecast?${q.toString()}`;
 }
@@ -52,7 +56,7 @@ const Daily = z.object({
   }),
 });
 
-/** Open-Meteo の答えから今日の天気を取り出す。形が違えば null。 */
+/** Open-Meteo の答えから今日 (先頭の日) の天気を取り出す。形が違えば null。 */
 export function parseWeather(body: unknown): Weather | null {
   const p = Daily.safeParse(body);
   if (!p.success) return null;
@@ -63,4 +67,51 @@ export function parseWeather(body: unknown): Weather | null {
     humidity: d.relative_humidity_2m_mean[0] as number,
     precip: d.precipitation_sum[0] as number,
   };
+}
+
+const Day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+const Series = z.array(Num.nullable()).max(FORECAST_DAYS * 2);
+const Forecast = z.object({
+  daily: z.object({
+    time: z
+      .array(Day)
+      .min(1)
+      .max(FORECAST_DAYS * 2),
+    temperature_2m_max: Series,
+    temperature_2m_min: Series,
+    relative_humidity_2m_mean: Series,
+    precipitation_sum: Series,
+  }),
+});
+
+/**
+ * Open-Meteo の答えから、日ごとの予報 (日付 → 天気) を取り出す。形が違えば空。
+ * 値の欠けた日 (null・配列が短い) は入れない。最高より最低が高い日も入れない (サーバーが受け取らないため)。
+ */
+export function parseForecast(body: unknown): Map<string, Weather> {
+  const out = new Map<string, Weather>();
+  const p = Forecast.safeParse(body);
+  if (!p.success) return out;
+  const d = p.data.daily;
+  d.time.forEach((day, i) => {
+    const tempMax = d.temperature_2m_max[i];
+    const tempMin = d.temperature_2m_min[i];
+    const humidity = d.relative_humidity_2m_mean[i];
+    const precip = d.precipitation_sum[i];
+    if (tempMax == null || tempMin == null || humidity == null || precip == null) return;
+    if (tempMin > tempMax) return;
+    out.set(day, { tempMax, tempMin, humidity, precip });
+  });
+  return out;
+}
+
+/** today から何日先か (過去は負)。 */
+export function daysAhead(today: string, day: string): number {
+  return Math.round((Date.parse(day) - Date.parse(today)) / 86_400_000);
+}
+
+/** その日のコーデを先に決めておけるか (今日から予報のある日まで)。 */
+export function canPlan(today: string, day: string): boolean {
+  const n = daysAhead(today, day);
+  return n >= 0 && n < FORECAST_DAYS;
 }

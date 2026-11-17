@@ -1,7 +1,31 @@
 import { expect, test, type Page } from "@playwright/test";
 
 // 体験の核を通しで: 服をしまう → 今日の画面でおすすめを着る → 着せ替える → 決める → カレンダーに載る
+//   → 3 日先の日のコーデを先に決めておく (AC-7-5)
 // 手元 (wrangler dev と手元の D1) だけで流す。本番・プレビューにはアカウントを作らない。
+// README の画像 (docs/shots/) もここで撮る: `npm run shots` (AC-9-2)。服は canvas で描いた絵で、人の写真は使わない。
+
+/** 画像の置き場所。npm run shots のときだけ docs/shots/ (README が貼る)。 */
+const shot = (name: string) => (process.env.SHOTS ? `docs/shots/${name}.png` : `test-results/${name}.png`);
+
+const ymd = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+/** 今日を含めて 16 日分の予報。3 日先だけ寒くて雨。 */
+function forecast(now: Date) {
+  const time = Array.from({ length: 16 }, (_, i) =>
+    ymd(new Date(now.getFullYear(), now.getMonth(), now.getDate() + i)),
+  );
+  return {
+    daily: {
+      time,
+      temperature_2m_max: time.map((_, i) => (i === 3 ? 9 : 14)),
+      temperature_2m_min: time.map((_, i) => (i === 3 ? 3 : 8)),
+      relative_humidity_2m_mean: time.map((_, i) => (i === 3 ? 85 : 70)),
+      precipitation_sum: time.map((_, i) => (i === 3 ? 4 : 0)),
+    },
+  };
+}
 
 async function authenticator(page: Page) {
   const cdp = await page.context().newCDPSession(page);
@@ -74,22 +98,15 @@ async function stash(page: Page, kind: string, label: string, warmth: number, pn
   await expect(page.getByTestId("shelf")).toContainText(label);
 }
 
-test("服をしまい、着せ替えて、今日のコーデに決めると、カレンダーに載る", async ({ page, baseURL }) => {
+test("AC-7-5 AC-9-2: 服をしまい、着せ替えて、今日のコーデに決めると、カレンダーに載る。先の日の分も決めておける", async ({
+  page,
+  baseURL,
+}) => {
   test.skip(baseURL?.startsWith("https://") === true, "本番・プレビューにはアカウントを作らない");
   await page.setViewportSize({ width: 390, height: 844 });
   await authenticator(page);
-  await page.route("https://api.open-meteo.com/**", (r) =>
-    r.fulfill({
-      json: {
-        daily: {
-          temperature_2m_max: [14],
-          temperature_2m_min: [8],
-          relative_humidity_2m_mean: [70],
-          precipitation_sum: [0],
-        },
-      },
-    }),
-  );
+  const now = new Date();
+  await page.route("https://api.open-meteo.com/**", (r) => r.fulfill({ json: forecast(now) }));
   await page.goto("./");
   await page.getByRole("button", { name: "はじめる" }).click();
   await expect(page.getByRole("region", { name: "クローゼット" })).toBeVisible();
@@ -98,12 +115,14 @@ test("服をしまい、着せ替えて、今日のコーデに決めると、�
   await stash(page, "トップス", "ピンクニット", 3, await garment(page, "#f2a7bb", "top"));
   await stash(page, "ボトムス", "デニム", 2, await garment(page, "#4a6fa5", "bottom"));
   await stash(page, "アウター", "トレンチ", 3, await garment(page, "#c8a97e", "outer"));
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.screenshot({ path: shot("closet") });
 
   await page.getByRole("navigation", { name: "画面" }).getByRole("button", { name: "今日" }).click();
   const stage = page.getByTestId("stage");
   await expect(stage.getByTestId("worn")).not.toHaveCount(0);
   const size = await stage.boundingBox();
-  await page.screenshot({ path: "test-results/today.png", fullPage: true });
+  await page.screenshot({ path: shot("today") });
 
   // 棚から引っ張り出して着せる (ドラッグ)
   await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
@@ -128,7 +147,29 @@ test("服をしまい、着せ替えて、今日のコーデに決めると、�
   await expect(page.getByTestId("stamp")).toBeVisible();
   await page.screenshot({ path: "test-results/decided.png", fullPage: true });
 
+  // 3 日先の日のコーデを先に決めておく
+  const ahead = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 3);
   await page.getByRole("navigation", { name: "画面" }).getByRole("button", { name: "カレンダー" }).click();
+  if (ahead.getMonth() !== now.getMonth()) await page.getByRole("button", { name: "次の月" }).click();
+  await page.getByTestId(`day-${ymd(ahead)}`).click();
+  await page.getByRole("button", { name: "この日のコーデを決める" }).click();
+  await expect(page.getByTestId("plan-bar")).toContainText(`${ahead.getMonth() + 1}月${ahead.getDate()}日`);
+  await expect(page.getByTestId("weather")).toHaveText("9℃ / 3℃・湿度 85%・雨 4mm");
+  await expect(stage.getByRole("img", { name: "トレンチ" })).toBeAttached(); // 寒い日はアウターまで
+  await page.getByRole("button", { name: "これに決めた" }).click();
+  await expect(page.getByTestId("stamp")).toBeVisible();
+  await page.getByRole("button", { name: "今日に戻る" }).click();
+  await expect(page.getByTestId("plan-bar")).toHaveCount(0);
+
+  await page.getByRole("navigation", { name: "画面" }).getByRole("button", { name: "カレンダー" }).click();
+  if (ahead.getMonth() !== now.getMonth()) {
+    await expect(page.getByTestId("day-plan")).toHaveCount(0);
+    await page.getByRole("button", { name: "次の月" }).click();
+    await expect(page.getByTestId("day-plan")).toHaveCount(1);
+    await page.getByRole("button", { name: "前の月" }).click();
+  } else {
+    await expect(page.getByTestId("day-plan")).toHaveCount(1);
+  }
   await expect(page.getByTestId("day-stamp")).toHaveCount(1);
-  await page.screenshot({ path: "test-results/calendar.png", fullPage: true });
+  await page.screenshot({ path: shot("calendar") });
 });

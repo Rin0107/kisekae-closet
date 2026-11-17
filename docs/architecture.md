@@ -10,6 +10,8 @@
 - **着せ替え**: 服は種類ごとに 1 枚。同じ種類を着ると入れ替わり、ワンピースは上下と入れ替わる (`src/outfit.ts` の `wear`)
 - **暖かさゲージ**: 着ている服 (くつ・こものは数えない) の暖かさの合計が、天気から決めた目標 (雨なら +1) の ±1 なら「ちょうどいい」。画面には数字を出さない (`gauge`)
 - **今日のコーデ**: その日の `outfits` の 1 件。決め直すと、新しいものを足してから前のものを消す
+- **先に決めておいたコーデ**: 今日から 15 日先までの日の `outfits` (worn_on が未来の日付。欄は足さない)。天気はその日の予報 (`weather.ts` の `parseForecast`・`canPlan`)。その日が来ると今日のコーデになる。最近着た服 (`recentlyWorn`) には数えない。サーバーも `api.ts` の `latestDay` で今日 (Asia/Tokyo) から 15 日先までに限る
+- **テーマ**: サイト全体の色の組 (`src/theme.ts`)。端末の localStorage にだけ置く
 - **天気の近さ**: 平均気温 ±1.5℃・湿度 ±10%・雨の有無が同じなら「ほぼ同じ」、±4℃・±20% なら「近い」 (`src/calendar.ts`)
 - **切り抜き**: 表示するときに端末で、写真の四辺につながった背景の色を透明にして服に切り詰める (`src/cutout.ts`)。サーバーには元の写真だけ
 
@@ -23,9 +25,9 @@
   - `photo.ts` (守り) — 写真の検査 (WebP/JPEG・300KB・Exif/XMP/IPTC なし)
   - `security.ts` (守り) — 守りのヘッダー
 - 画面 (`src/`)
-  - 決まり (純粋な関数): `recommend.ts`・`outfit.ts` (着せ替え・ゲージ)・`calendar.ts` (月のマス・天気の近さ)・`cutout.ts` の `cutout`・`weather.ts`・`shrink.ts` の `fitSize`/`encodeSmall`
+  - 決まり (純粋な関数): `theme.ts` (色の組・コントラスト)・`recommend.ts`・`outfit.ts` (着せ替え・ゲージ)・`calendar.ts` (月のマス・天気の近さ)・`cutout.ts` の `cutout`・`weather.ts`・`shrink.ts` の `fitSize`/`encodeSmall`
   - 通信: `client.ts` (zod で答えを検査)・`passkey.ts` (@simplewebauthn/browser)
-  - 端末の保存: `storage.ts` (選んだ市だけ)
+  - 端末の保存: `storage.ts` (選んだ市とテーマだけ)
   - UI: `App.tsx` (今日・クローゼット・カレンダーの 3 画面と下のタブバー)・`Avatar.tsx` (アバターの台)・`Photo.tsx` (切り抜いた写真)
 
 ## API
@@ -62,3 +64,4 @@ Cloudflare で動くのは版固定の wrangler だけ (工場の書いたコー
 - 2026-11-15 服は写真で登録 (持ち主の指定)。R2 は無料でもカードが要るので、D1 に 1 枚 300KB まで
 - 2026-11-17 ラベルは今は服に 1 つ (`clothes.label`)。複数のラベル (labels 表) は migrations の変更なので、要ると分かったら人に頼む
 - 2026-11-17 アバターは今は repo の中の SVG (正面・すらっとした等身)。CC0 の 3D モデルから作った正面の姿への置きかえは次の版
+- 2026-11-17 先の日のコーデは今の `outfits` に未来の日付で置く (migrations を変えない)。予報は Open-Meteo の上限の 16 日 (今日を含む) を 1 回で読む。それより先 (例年の値)・旅行先の市は次の版

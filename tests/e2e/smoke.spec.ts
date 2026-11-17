@@ -79,10 +79,13 @@ test("パスキーで始め、ログアウトし、もう一度ログインで�
 }) => {
   test.skip(baseURL?.startsWith("https://") === true, "本番・プレビューにはアカウントを作らない");
   await authenticator(page);
+  const now = new Date();
+  const day = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
   await page.route("https://api.open-meteo.com/**", (r) =>
     r.fulfill({
       json: {
         daily: {
+          time: [day],
           temperature_2m_max: [16],
           temperature_2m_min: [8],
           relative_humidity_2m_mean: [60],
