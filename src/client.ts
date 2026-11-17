@@ -66,5 +66,6 @@ export const api = {
   deleteClothing: (id: string) => call(`clothes/${encodeURIComponent(id)}`, Ok, { method: "DELETE" }),
   outfits: async () => (await call("outfits", z.object({ outfits: z.array(OutfitSchema) }))).outfits,
   addOutfit: (o: Omit<Outfit, "id">) => call("outfits", Created, { method: "POST", body: o }),
+  deleteOutfit: (id: string) => call(`outfits/${encodeURIComponent(id)}`, Ok, { method: "DELETE" }),
   photoUrl: (id: string) => `/api/clothes/${encodeURIComponent(id)}/photo`,
 };

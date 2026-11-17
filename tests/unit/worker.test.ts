@@ -426,3 +426,23 @@ describe("本文", () => {
     expect(NOW).toBeGreaterThan(0);
   });
 });
+
+describe("今日のコーデ", () => {
+  test("AC-1-5: 決めたコーデは、別の利用者からは読めない・消せない", async () => {
+    const a = await signUp();
+    const b = await signUp();
+    const id = (
+      await call("POST", "/api/clothes", {
+        cookie: a,
+        body: { kind: "top", warmth: 2, label: "白T", photo: JPEG },
+      })
+    ).body.id as string;
+    const day = { wornOn: "2026-11-17", itemIds: [id], tempMax: 14, tempMin: 8, humidity: 60, precip: 0 };
+    const o = (await call("POST", "/api/outfits", { cookie: a, body: day })).body.id as string;
+    expect((await call("GET", "/api/outfits", { cookie: b })).body).toEqual({ outfits: [] });
+    expect((await call("DELETE", `/api/outfits/${o}`, { cookie: b })).res.status).toBe(404);
+    expect((await call("GET", "/api/export", { cookie: b })).body).toEqual({ clothes: [], outfits: [] });
+    expect((await call("GET", "/api/outfits", { cookie: a })).body).toEqual({ outfits: [{ id: o, ...day }] });
+    expect((await call("DELETE", `/api/outfits/${o}`, { cookie: a })).body).toEqual({ ok: true });
+  });
+});

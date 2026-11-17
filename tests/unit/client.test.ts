@@ -77,6 +77,7 @@ describe("api", () => {
       [200, { ok: true }],
       [200, { outfits: [outfit] }],
       [201, { id: "o" }],
+      [200, { ok: true }],
     );
     expect(await api.me()).toEqual({ signedIn: true });
     await api.logout();
@@ -87,6 +88,7 @@ describe("api", () => {
     expect(await api.outfits()).toEqual([outfit]);
     const rest = { wornOn: outfit.wornOn, tempMax: 1, tempMin: 0, humidity: 1, precip: 0, itemIds: ["a"] };
     await api.addOutfit(rest);
+    await api.deleteOutfit("o/1");
     expect(
       f.mock.calls.map(
         (c) => `${(c as unknown as [string, { method: string }])[1].method} ${(c as unknown[])[0]}`,
@@ -100,6 +102,7 @@ describe("api", () => {
       "DELETE /api/clothes/a%2Fb",
       "GET /api/outfits",
       "POST /api/outfits",
+      "DELETE /api/outfits/o%2F1",
     ]);
     expect(api.photoUrl("a b")).toBe("/api/clothes/a%20b/photo");
   });

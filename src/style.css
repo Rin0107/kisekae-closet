@@ -1,12 +1,606 @@
+/* トークン (docs/design-system.md)。部品は生の値を書かず、変数だけを使う。色の基本はいちごミルク。 */
 :root {
-  color-scheme: light dark;
-  font-family: system-ui, sans-serif;
+  color-scheme: light;
+  --c-bg: #fff7f9;
+  --c-surface: #ffffff;
+  --c-surface-2: #fdeef2;
+  --c-text: #3d2a30;
+  --c-muted: #7a5f67;
+  --c-primary: #e86a8a;
+  --c-primary-strong: #c94a6c;
+  --c-on-primary: #ffffff;
+  --c-primary-soft: #fbd3dd;
+  --c-line: #f1d5dc;
+  --c-danger: #b3261e;
+  --c-cold: #a9c8f0;
+  --c-ok: #b9e4c4;
+  --c-hot: #f5b7a1;
+  --c-same: #f9b9c9;
+  --c-near: #fde3ea;
+  --c-gold: #f2c14e;
+  --font: system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
+  --fs-s: 0.8125rem;
+  --fs-m: 1rem;
+  --fs-l: 1.25rem;
+  --sp-1: 0.25rem;
+  --sp-2: 0.5rem;
+  --sp-3: 1rem;
+  --sp-4: 1.5rem;
+  --radius: 16px;
+  --radius-s: 10px;
+  --shadow: 0 2px 10px rgb(201 74 108 / 0.12);
+  --tap: 48px;
+  --stage-w: 200px;
+  --stage-h: 400px;
+  --tabbar-h: 56px;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --dur: 240ms;
+  font-family: var(--font);
+  color: var(--c-text);
+}
+* {
+  box-sizing: border-box;
 }
 body {
   margin: 0;
+  background: var(--c-bg);
 }
 main {
   max-width: 40rem;
   margin: 0 auto;
-  padding: 1rem;
+  padding: var(--sp-3);
+  padding-bottom: calc(var(--tabbar-h) + var(--sp-4) + env(safe-area-inset-bottom));
+}
+h1,
+h2 {
+  margin: var(--sp-3) 0 var(--sp-2);
+  font-size: var(--fs-l);
+}
+.muted {
+  color: var(--c-muted);
+  font-size: var(--fs-s);
+}
+[role="alert"] {
+  color: var(--c-danger);
+}
+button,
+select,
+input,
+.file {
+  font: inherit;
+  min-height: var(--tap);
+}
+button {
+  cursor: pointer;
+  border-radius: 999px;
+  border: 1px solid var(--c-line);
+  background: var(--c-surface);
+  color: var(--c-text);
+  padding: 0 var(--sp-3);
+  transition: background var(--dur) var(--ease);
+}
+button:focus-visible,
+select:focus-visible,
+input:focus-visible {
+  outline: 3px solid var(--c-primary-strong);
+  outline-offset: 2px;
+}
+button.primary {
+  background: var(--c-primary-strong);
+  border-color: var(--c-primary-strong);
+  color: var(--c-on-primary);
+  font-weight: 700;
+}
+button.primary:disabled {
+  opacity: 0.5;
+}
+button.ghost {
+  background: transparent;
+}
+button.danger {
+  color: var(--c-danger);
+}
+button.small {
+  min-height: 40px;
+  font-size: var(--fs-s);
+}
+button[aria-pressed="true"],
+button[aria-selected="true"] {
+  background: var(--c-primary-soft);
+  border-color: var(--c-primary);
+  font-weight: 700;
+}
+select,
+input {
+  border: 1px solid var(--c-line);
+  border-radius: var(--radius-s);
+  background: var(--c-surface);
+  padding: 0 var(--sp-2);
+  color: var(--c-text);
+}
+.field {
+  display: grid;
+  gap: var(--sp-1);
+  margin: var(--sp-2) 0;
+  font-size: var(--fs-s);
+}
+.welcome {
+  display: grid;
+  gap: var(--sp-2);
+  padding-bottom: var(--sp-4);
+}
+
+/* 今日 */
+.weather-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+.weather {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0;
+  font-weight: 600;
+}
+.sky {
+  width: 24px;
+  height: 24px;
+  flex: none;
+  fill: none;
+  stroke: var(--c-muted);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+}
+.sky-sun {
+  stroke: var(--c-gold);
+}
+.sky-sun circle {
+  fill: var(--c-gold);
+}
+.sky-rain {
+  stroke: var(--c-cold);
+}
+
+/* アバターの台: 大きさは固定。中身で変わらない */
+.stage-wrap {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  margin: var(--sp-2) 0;
+}
+.stage {
+  position: relative;
+  flex: none;
+  width: var(--stage-w);
+  height: var(--stage-h);
+  margin: 0;
+  border-radius: var(--radius);
+  background: radial-gradient(ellipse at 50% 35%, var(--c-surface) 0%, var(--c-surface-2) 70%);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.stage .body {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.wear {
+  position: absolute;
+  object-fit: contain;
+  filter: drop-shadow(0 2px 3px rgb(0 0 0 / 0.18));
+  pointer-events: none;
+}
+.sparkle {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9;
+}
+.sparkle i {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  background: var(--c-gold);
+  clip-path: polygon(50% 0, 62% 38%, 100% 50%, 62% 62%, 50% 100%, 38% 62%, 0 50%, 38% 38%);
+  animation: twinkle 700ms var(--ease) forwards;
+  opacity: 0;
+}
+.sparkle i:nth-child(1) {
+  top: 22%;
+  left: 18%;
+}
+.sparkle i:nth-child(2) {
+  top: 40%;
+  left: 74%;
+  animation-delay: 120ms;
+}
+.sparkle i:nth-child(3) {
+  top: 66%;
+  left: 30%;
+  animation-delay: 220ms;
+}
+@keyframes twinkle {
+  0% {
+    opacity: 0;
+    transform: scale(0.2) rotate(0);
+  }
+  45% {
+    opacity: 1;
+    transform: scale(1.2) rotate(30deg);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.6) rotate(60deg);
+  }
+}
+.stamp {
+  position: absolute;
+  bottom: var(--sp-4);
+  right: calc(50% - var(--stage-w) / 2 - var(--sp-2));
+  transform: rotate(-12deg);
+  padding: var(--sp-1) var(--sp-2);
+  border: 3px solid var(--c-primary-strong);
+  border-radius: var(--radius-s);
+  background: var(--c-surface);
+  color: var(--c-primary-strong);
+  font-weight: 800;
+  z-index: 10;
+  animation: stamp 360ms var(--ease);
+}
+@keyframes stamp {
+  from {
+    transform: rotate(-12deg) scale(2);
+    opacity: 0;
+  }
+}
+
+/* ラベル: 高さ固定の 1 行 (アバターに重ねない) */
+.chips {
+  display: flex;
+  justify-content: center;
+  gap: var(--sp-1);
+  height: 32px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 var(--sp-2);
+  border-radius: 999px;
+  background: var(--c-primary-soft);
+  font-size: var(--fs-s);
+}
+.chip.more {
+  background: var(--c-surface-2);
+}
+
+/* 暖かさゲージ (数字は見せない) */
+.gauge {
+  margin: var(--sp-2) auto;
+  max-width: 22rem;
+}
+.gauge-track {
+  position: relative;
+  display: grid;
+  grid-template-columns: 4fr 2fr 4fr;
+  height: 12px;
+  border-radius: 999px;
+  overflow: visible;
+}
+.gauge-track .cold {
+  background: var(--c-cold);
+  border-radius: 999px 0 0 999px;
+}
+.gauge-track .ok {
+  background: var(--c-ok);
+}
+.gauge-track .hot {
+  background: var(--c-hot);
+  border-radius: 0 999px 999px 0;
+}
+.gauge-thumb {
+  position: absolute;
+  top: 50%;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 3px solid var(--c-surface);
+  background: var(--c-primary-strong);
+  box-shadow: var(--shadow);
+  transform: translate(-50%, -50%);
+  transition: left var(--dur) var(--ease);
+}
+.gauge-words {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--fs-s);
+  color: var(--c-muted);
+  margin-top: var(--sp-1);
+}
+.gauge-word {
+  margin: var(--sp-1) 0 0;
+  text-align: center;
+}
+.decide-row {
+  display: grid;
+  justify-items: center;
+  gap: var(--sp-1);
+  min-height: var(--tap);
+}
+.decide {
+  width: min(100%, 22rem);
+  font-size: var(--fs-l);
+}
+
+/* クローゼット */
+.closet {
+  margin-top: var(--sp-3);
+  background: var(--c-surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: var(--sp-2);
+}
+.shelves,
+.kinds {
+  display: flex;
+  gap: var(--sp-1);
+  overflow-x: auto;
+  padding-bottom: var(--sp-1);
+}
+.shelves button,
+.kinds button {
+  flex: none;
+}
+.rack {
+  display: flex;
+  gap: var(--sp-2);
+  margin: var(--sp-2) 0 0;
+  padding: 0 0 var(--sp-2);
+  list-style: none;
+  overflow-x: auto;
+}
+.rack.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  overflow: visible;
+}
+.garment {
+  display: grid;
+  justify-items: center;
+  gap: var(--sp-1);
+  width: 112px;
+  padding: var(--sp-2);
+  border-radius: var(--radius-s);
+  background: var(--c-surface-2);
+  border: 1px solid var(--c-line);
+  touch-action: pan-x;
+  user-select: none;
+}
+.rack.grid .garment {
+  width: auto;
+}
+.garment img {
+  width: 88px;
+  height: 88px;
+  object-fit: contain;
+}
+.garment-label {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-s);
+}
+.ghost-drag {
+  position: fixed;
+  width: 96px;
+  height: 96px;
+  object-fit: contain;
+  transform: translate(-50%, -50%) rotate(-4deg);
+  pointer-events: none;
+  z-index: 20;
+  opacity: 0.9;
+}
+.empty {
+  padding: var(--sp-3);
+  text-align: center;
+}
+
+/* 登録 */
+.register {
+  display: grid;
+  gap: var(--sp-2);
+}
+.frame {
+  position: relative;
+  width: 220px;
+  height: 220px;
+  margin: 0 auto;
+  border-radius: var(--radius);
+  background: var(--c-surface-2);
+}
+.frame img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.frame svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  fill: none;
+  stroke: var(--c-primary-strong);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 3;
+}
+.guide {
+  margin: 0;
+  font-size: var(--fs-s);
+}
+.file {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-s);
+}
+.warmth {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: var(--fs-s);
+}
+.warmth button {
+  color: var(--c-primary-strong);
+  letter-spacing: -2px;
+}
+
+/* カレンダー */
+.month {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.legend {
+  display: flex;
+  gap: var(--sp-3);
+  margin: 0 0 var(--sp-2);
+  padding: 0;
+  list-style: none;
+  font-size: var(--fs-s);
+}
+.legend li::before {
+  content: "";
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  margin-right: var(--sp-1);
+  border-radius: 4px;
+  vertical-align: -2px;
+  border: 1px solid var(--c-line);
+}
+.legend .same::before,
+.day.same {
+  background: var(--c-same);
+}
+.legend .near::before,
+.day.near {
+  background: var(--c-near);
+}
+.month-grid {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 2px;
+}
+.month-grid th {
+  font-size: var(--fs-s);
+  font-weight: 500;
+  color: var(--c-muted);
+}
+.month-grid td {
+  padding: 0;
+}
+.day {
+  position: relative;
+  display: grid;
+  align-content: start;
+  justify-items: center;
+  width: 100%;
+  min-height: 64px;
+  padding: 2px;
+  border-radius: var(--radius-s);
+  font-size: 0.6875rem;
+}
+.day.is-today {
+  border: 2px solid var(--c-primary-strong);
+}
+.day .num {
+  font-size: var(--fs-s);
+  font-weight: 600;
+}
+.mini {
+  display: grid;
+  justify-items: center;
+  line-height: 1.1;
+}
+.mini .sky {
+  width: 16px;
+  height: 16px;
+}
+.day-stamp {
+  position: absolute;
+  top: 1px;
+  right: 3px;
+  color: var(--c-primary-strong);
+}
+.picked {
+  margin-top: var(--sp-3);
+  display: grid;
+  justify-items: center;
+  gap: var(--sp-2);
+}
+
+/* 下のタブバー */
+.tabbar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  height: calc(var(--tabbar-h) + env(safe-area-inset-bottom));
+  padding-bottom: env(safe-area-inset-bottom);
+  background: var(--c-surface);
+  border-top: 1px solid var(--c-line);
+  z-index: 15;
+}
+.tabbar button {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font-size: var(--fs-s);
+}
+.tabbar button[aria-current="page"] {
+  color: var(--c-primary-strong);
+  font-weight: 800;
+}
+.account {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-top: var(--sp-4);
+  font-size: var(--fs-s);
+}
+.account a {
+  color: var(--c-primary-strong);
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+  .sparkle i {
+    opacity: 1;
+  }
+}
+.wear {
+  object-position: 50% 0;
+}
+.wear-shoes {
+  object-position: 50% 100%;
 }

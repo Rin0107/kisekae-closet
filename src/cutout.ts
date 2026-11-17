@@ -1,0 +1,142 @@
+// 服の写真の切り抜き (端末の中だけ。サーバーには元の写真だけがある)。
+// 写真の四辺につながった「背景の色」の画素を透明にし、服のところだけに切り詰める。
+// 表示するときに 1 回だけ計算し、blob: の URL にしておく (同じ写真は使い回す)。
+
+export interface Box {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** 背景とみなす色の差 (RGB の距離の 2 乗の上限)。 */
+export const TOLERANCE = 48 * 48 * 3;
+
+/**
+ * px (RGBA) の背景を透明にする。背景の色は四辺の画素の平均。四辺から、背景の色に近い画素を塗りつぶしでたどる。
+ * 残った (服の) 画素を囲む箱を返す。全部が背景なら null (切り抜かない: px は元のまま)。
+ */
+export function cutout(px: Uint8ClampedArray, w: number, h: number, tol = TOLERANCE): Box | null {
+  const n = w * h;
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  let k = 0;
+  const border: number[] = [];
+  for (let x = 0; x < w; x++) border.push(x, (h - 1) * w + x);
+  for (let y = 1; y < h - 1; y++) border.push(y * w, y * w + w - 1);
+  for (const i of border) {
+    r += px[i * 4] as number;
+    g += px[i * 4 + 1] as number;
+    b += px[i * 4 + 2] as number;
+    k++;
+  }
+  r /= k;
+  g /= k;
+  b /= k;
+  const near = (i: number) => {
+    const dr = (px[i * 4] as number) - r;
+    const dg = (px[i * 4 + 1] as number) - g;
+    const db = (px[i * 4 + 2] as number) - b;
+    return dr * dr + dg * dg + db * db <= tol || (px[i * 4 + 3] as number) === 0;
+  };
+  const bg = new Uint8Array(n);
+  const queue = new Int32Array(n);
+  let head = 0;
+  let tail = 0;
+  for (const i of border)
+    if (bg[i] === 0 && near(i)) {
+      bg[i] = 1;
+      queue[tail++] = i;
+    }
+  while (head < tail) {
+    const i = queue[head++] as number;
+    const x = i % w;
+    const next = [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, i - w, i + w];
+    for (const j of next)
+      if (j >= 0 && j < n && bg[j] === 0 && near(j)) {
+        bg[j] = 1;
+        queue[tail++] = j;
+      }
+  }
+  if (tail === n) return null;
+  let x0 = w;
+  let y0 = h;
+  let x1 = -1;
+  let y1 = -1;
+  for (let i = 0; i < n; i++) {
+    if (bg[i] === 1) {
+      px[i * 4 + 3] = 0;
+      continue;
+    }
+    const x = i % w;
+    const y = (i - x) / w;
+    if (x < x0) x0 = x;
+    if (x > x1) x1 = x;
+    if (y < y0) y0 = y;
+    if (y > y1) y1 = y;
+  }
+  return { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
+}
+
+/** 切り抜く前に縮める大きさ (長辺)。 */
+export const CUT_SIDE = 512;
+
+async function render(src: string): Promise<string> {
+  const res = await fetch(src, { credentials: "same-origin" });
+  if (!res.ok) return src;
+  const img = await createImageBitmap(await res.blob());
+  const s = Math.min(1, CUT_SIDE / Math.max(img.width, img.height));
+  const w = Math.max(1, Math.round(img.width * s));
+  const h = Math.max(1, Math.round(img.height * s));
+  const c = document.createElement("canvas");
+  c.width = w;
+  c.height = h;
+  const g = c.getContext("2d");
+  if (g === null) return src;
+  g.drawImage(img, 0, 0, w, h);
+  img.close();
+  const data = g.getImageData(0, 0, w, h);
+  const box = cutout(data.data, w, h);
+  if (box === null) return src;
+  g.putImageData(data, 0, 0);
+  const out = document.createElement("canvas");
+  out.width = box.w;
+  out.height = box.h;
+  out.getContext("2d")?.drawImage(c, box.x, box.y, box.w, box.h, 0, 0, box.w, box.h);
+  const blob = await new Promise<Blob | null>((ok) => out.toBlob(ok, "image/png"));
+  return blob === null ? src : URL.createObjectURL(blob);
+}
+
+/** 切り抜いた写真を覚えておく数 (最近使ったものから)。追い出したものは blob: を手放す。 */
+export const CACHE_SIZE = 60;
+const cache = new Map<string, Promise<string>>();
+
+function release(src: string, p: Promise<string>) {
+  void p.then((url) => {
+    if (url !== src) URL.revokeObjectURL(url);
+  });
+}
+
+/** 切り抜いた写真の URL (blob:)。できない端末・失敗は元の URL。 */
+export function cutoutUrl(src: string): Promise<string> {
+  if (typeof createImageBitmap !== "function") return Promise.resolve(src);
+  let p = cache.get(src);
+  if (p === undefined) p = render(src).catch(() => src);
+  cache.delete(src);
+  cache.set(src, p); // 最近使ったものを後ろへ
+  while (cache.size > CACHE_SIZE) {
+    const [old, q] = cache.entries().next().value as [string, Promise<string>];
+    cache.delete(old);
+    release(old, q);
+  }
+  return p;
+}
+
+/** 消した服の切り抜きを手放す。 */
+export function forgetCutout(src: string): void {
+  const p = cache.get(src);
+  if (p === undefined) return;
+  cache.delete(src);
+  release(src, p);
+}
