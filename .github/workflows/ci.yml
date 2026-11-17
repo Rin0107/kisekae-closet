@@ -1,0 +1,133 @@
+# 守りの部分 (wakuwaku guard で書き換え禁止)。すべて green でないと wk merge は merge しない。
+# Actions はコミットの SHA で固定する (タグのすり替え対策)。
+# テストの大きさ (docs/TESTING.md): S = verify (単体・境界値・全件ループ・PBT・fuzz のシード、カバレッジ 100%)、
+#   M = e2e (手元の Worker をブラウザで)、L = preview-e2e.yml (本物のプレビューの URL。wk deploy が起動する)
+# 速さ: どのジョブも 5 分で打ち切る (超えたら失敗 = merge できない)。ジョブは並んで走る。
+name: ci
+on:
+  pull_request:
+  push:
+    branches: [main]
+  # v3: 重い検査 (fuzz・mutation・formal) は公開の前に手で起動する (harness/prompts/ship.md の 1.5。docs/DESIGN-v3.md §5)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with: { node-version: 24, cache: npm }
+      - run: npm ci --no-audit --no-fund
+      - run: npm run verify
+
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # ブラウザ入りの公式イメージ (版と digest を固定。入れる時間を省いて 5 分に収める)
+    container: mcr.microsoft.com/playwright:v1.65.0-noble@sha256:6e3fb709361521eb27161606e6da6d2674e5e89fa16516cb37d6fdd91372273d
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - run: npm ci --no-audit --no-fund
+      - run: npm run e2e
+        env: { CI: "1", WRANGLER_SEND_METRICS: "false" }
+
+  # fuzzing: 名前に fuzz を含むテストが、時間いっぱい新しい入力を探す
+  fuzz:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with: { node-version: 24, cache: npm }
+      - run: npm ci --no-audit --no-fund
+      - run: npm run fuzz
+        env: { FUZZ_MS: "150000" }
+
+  # ミューテーション: 変えたコードを壊して、テストが気づくか (score 95% 以上)
+  mutation:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { fetch-depth: 0, persist-credentials: false }
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with: { node-version: 24, cache: npm }
+      - run: npm ci --no-audit --no-fund
+      - run: npm run mutate -- "${{ github.event.pull_request.base.sha || github.event.before }}"
+
+  # 仕様: TLA+ (TLC) と Z3。道具は版と sha256 を固定する
+  formal:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - name: 道具を入れる (tla2tools 1.7.4・z3 5.1.0)
+        run: |
+          curl -sSfL -o /tmp/tla2tools.jar https://github.com/tlaplus/tlaplus/releases/download/v1.7.4/tla2tools.jar
+          echo "936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88  /tmp/tla2tools.jar" | sha256sum -c
+          curl -sSfL -o /tmp/z3.zip https://github.com/Z3Prover/z3/releases/download/z3-5.1.0/z3-5.1.0-x64-glibc-2.39.zip
+          echo "f47be8d27d3230e823bf1eeede2fe0abaca55bb78d0b59974370e6689a92284a  /tmp/z3.zip" | sha256sum -c
+          unzip -q /tmp/z3.zip -d /tmp/z3
+      - run: sh scripts/formal.sh
+        env:
+          TLA2TOOLS: /tmp/tla2tools.jar
+          Z3: /tmp/z3/z3-5.1.0-x64-glibc-2.39/bin/z3
+
+  security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read # gitleaks-action は PR のコミット一覧を読む (ないと 403)
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { fetch-depth: 0, persist-credentials: false }
+      - name: gitleaks (履歴全体の秘密情報)
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_COMMENTS: "false"
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
+      - name: 個人情報 (メールアドレス・家のパス・名前。今のファイルと、このコミットたちの作者・メッセージ・足した行)
+        env:
+          RANGE: ${{ github.event_name == 'pull_request' && format('{0}..{1}', github.event.pull_request.base.sha, github.event.pull_request.head.sha) || format('{0}..{1}', github.event.before, github.sha) }}
+        run: |
+          node scripts/privacy-scan.mjs tree
+          node scripts/privacy-scan.mjs range "$RANGE"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with: { node-version: 24 }
+      - name: npm audit (高以上の既知の脆弱性)
+        run: npm audit --audit-level=high --omit=dev && npm audit --audit-level=critical
+      - name: OSV-Scanner
+        uses: google/osv-scanner-action/osv-scanner-action@b1d267aea5211fa648d9d442fa64b90dbdcbdd36 # v2.7.0
+        with:
+          scan-args: --lockfile=package-lock.json
+
+  ac-coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - run: node scripts/ac-coverage.mjs
+        env: { GH_TOKEN: "${{ github.token }}" }

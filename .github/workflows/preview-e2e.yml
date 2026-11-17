@@ -1,0 +1,29 @@
+# 守りの部分。L のテスト: 本物のプレビュー (Cloudflare の配信用の repo の preview) を、ブラウザで e2e する。
+# wk deploy がプレビューに出したあとに起動し、結果を待つ (落ちたらデプロイも失敗)。
+name: preview-e2e
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "プレビューの URL (https://…workers.dev/<名前>/)"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # ブラウザ入りの公式イメージ (版と digest を固定。入れる時間を省いて 5 分に収める)
+    container: mcr.microsoft.com/playwright:v1.65.0-noble@sha256:6e3fb709361521eb27161606e6da6d2674e5e89fa16516cb37d6fdd91372273d
+    steps:
+      - name: URL を確かめる (自分のプレビューだけ)
+        env: { BASE_URL: "${{ inputs.base_url }}" }
+        run: |
+          echo "$BASE_URL" | grep -Eq '^https://[a-z0-9-]+\.[a-z0-9-]+\.workers\.dev/[a-z0-9-]+/$' || { echo "URL の形が違う: $BASE_URL"; exit 1; }
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - run: npm ci --no-audit --no-fund
+      - run: npx playwright test
+        env: { CI: "1", BASE_URL: "${{ inputs.base_url }}" }

@@ -1,0 +1,20 @@
+// 手元の確認用 (npm run dev・npm run e2e が wrangler dev で動かす。D1 は手元の SQLite)。
+// 本番の設定は wk deploy が作る (名前・D1 の database_id・ORIGIN)。鍵はこのマシンにも repo にも置かない。
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "kisekae-closet",
+  "main": "src/worker/index.ts",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": true,
+  },
+  "d1_databases": [{ "binding": "DB", "database_name": "kisekae-closet", "database_id": "local", "migrations_dir": "migrations" }],
+  // パスキーは IP では使えないので、手元は localhost
+  "vars": { "ORIGIN": "http://localhost:8787" },
+  "observability": { "enabled": false },
+  "workers_dev": true,
+  "preview_urls": false,
+}

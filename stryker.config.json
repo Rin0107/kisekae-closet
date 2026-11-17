@@ -1,0 +1,12 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "_comment": "ミューテーションの基準。同時に動かすのは 2 つまで (手元の機械を守る。npm run mutate が 3G・2 コアの cgroup に入れる)。守りの部分 (wakuwaku guard で書き換え禁止)。scripts/mutate.mjs が変えたファイルだけを --mutate で渡す",
+  "testRunner": "vitest",
+  "vitest": { "configFile": "vitest.config.ts" },
+  "coverageAnalysis": "perTest",
+  "thresholds": { "high": 100, "low": 95, "break": 95 },
+  "reporters": ["clear-text", "progress"],
+  "tempDirName": ".stryker-tmp",
+  "timeoutFactor": 3,
+  "concurrency": 2
+}
