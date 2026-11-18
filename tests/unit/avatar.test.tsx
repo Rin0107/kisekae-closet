@@ -8,6 +8,7 @@ import {
   BODICE_SHARE,
   BODY,
   BOTTOM_MIN_WIDTH,
+  FOOT_BOX,
   place,
   shoeFeet,
   SLOTS,
@@ -178,7 +179,8 @@ describe("くつを足に (#32)", () => {
         expect(b.left + b.width / 2, `${ratio}`).toBeCloseTo(cx, 5);
         expect(b.left, `${ratio}`).toBeLessThan(cx - BODY.footWidth / 4);
         expect(b.left + b.width, `${ratio}`).toBeGreaterThan(cx + BODY.footWidth / 4);
-        expect(b.width, `${ratio}`).toBeLessThanOrEqual(BODY.footWidth + 3);
+        // 足より一回り大きいところまで (#39 で上限を FOOT_BOX の 16% に)。足の間には届かない (下の 40% / 60%)
+        expect(b.width, `${ratio}`).toBeLessThanOrEqual(FOOT_BOX.width);
         // 足の裏にそろう
         expect(b.top + (b.height ?? 0), `${ratio}`).toBeCloseTo(BODY.sole + 0.5, 5);
       });
@@ -220,6 +222,67 @@ describe("くつを足に (#32)", () => {
     expect(/\.wear-foot \{([^}]*)\}/.exec(css)?.[1]).toContain("overflow: hidden");
     for (const m of css.matchAll(/\.wear-foot[^{]*\{([^}]*)\}/g))
       expect(m[1]).not.toMatch(/transform|skew|object-fit: fill/);
+  });
+});
+
+describe("くつを形の分かる大きさで (#39)", () => {
+  const RATIOS = [null, 0.3, 90 / 240, 0.5, 0.8, 1.2];
+
+  test("AC-39-1: くつの片足の箱が、足の幅 (BODY.footWidth) より大きい", async () => {
+    for (const ratio of RATIOS)
+      for (const b of shoeFeet(ratio)) {
+        expect(b.width, `${ratio}`).toBeGreaterThan(BODY.footWidth);
+        // 形が分かる高さもある (台の高さの 4.5% 以上。2 足を並べた平たい写真 0.3 でも)
+        expect(b.height ?? 0, `${ratio}`).toBeGreaterThanOrEqual(4.5);
+      }
+    // 描いた台の上でも (横長の 2 足の写真)
+    const el = await wearOne("shoes");
+    await loaded(el.querySelector<HTMLImageElement>('[data-testid="worn"]') as HTMLImageElement, 240, 90);
+    for (const f of el.querySelectorAll<HTMLElement>('[data-testid="foot"]'))
+      expect(pct(f.style.width)).toBeGreaterThan(BODY.footWidth);
+  });
+
+  test("AC-39-2: 長ズボンを履いていても、くつの甲の部分が見える (裾に全部隠れない)", async () => {
+    // 足首まで届く長ズボン (縦 ÷ 横 2.3) の裾は、くつの上の端より下まで来る (重なる)
+    const pants = place("bottom", 2.3);
+    if (pants === null) throw new Error("bottom");
+    const hem = pants.top + pants.width * RATIO * 2.3;
+    for (const ratio of RATIOS) for (const b of shoeFeet(ratio)) expect(b.top, `${ratio}`).toBeLessThan(hem);
+    // だから、くつは裾より前に重ねる
+    expect(SLOTS.shoes?.z ?? 0).toBeGreaterThan(SLOTS.bottom?.z ?? 0);
+    // 描いた台の上でも: くつの箱の重なりの順が、ボトムスの写真より上
+    const el = document.createElement("div");
+    document.body.appendChild(el);
+    await act(async () =>
+      createRoot(el).render(
+        <Stage
+          worn={[
+            { id: "b", kind: "bottom", warmth: 2, label: "長ズボン", createdAt: 1 },
+            { id: "s", kind: "shoes", warmth: 1, label: "くつ", createdAt: 2 },
+          ]}
+        />,
+      ),
+    );
+    const bottom = el.querySelector<HTMLElement>('[data-kind="bottom"]') as HTMLElement;
+    const feet = [...el.querySelectorAll<HTMLElement>('[data-testid="foot"]')];
+    expect(feet).toHaveLength(2);
+    for (const f of feet) expect(Number(f.style.zIndex)).toBeGreaterThan(Number(bottom.style.zIndex));
+  });
+
+  test("AC-39-3: 左右の足の上にあることと、写真を曲げないことは #32 のまま", () => {
+    for (const ratio of RATIOS) {
+      const half = ratio === null ? 1 : 2 * ratio;
+      shoeFeet(ratio).forEach((b, i) => {
+        const cx = BODY.feet[i] as number;
+        expect(b.left + b.width / 2, `${ratio}`).toBeCloseTo(cx, 5);
+        expect(b.top + (b.height ?? 0), `${ratio}`).toBeCloseTo(BODY.sole + 0.5, 5);
+        // 箱の縦横比 = 写真の半分の縦横比 (曲げない)
+        expect((b.height ?? 0) / RATIO / b.width, `${ratio}`).toBeCloseTo(half, 5);
+      });
+      const [l, r] = shoeFeet(ratio);
+      expect(l.left + l.width).toBeLessThan(50 - 10);
+      expect(r.left).toBeGreaterThan(50 + 10);
+    }
   });
 });
 

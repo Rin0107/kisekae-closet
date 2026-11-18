@@ -52,8 +52,9 @@ export const BODICE_SHARE = 0.52;
  * outer はトップスより一回り大きく、少し下から始める (中のトップスの襟元がのぞく、#33)。
  */
 export const SLOTS: Record<string, Slot> = {
-  shoes: { top: 86, left: 22, width: 56, height: 8, z: 1, fit: "box" },
-  bottom: { top: 42, left: 26, width: 48, height: 50, z: 2, fit: "width" },
+  // くつはボトムスの裾より前 (長ズボンでも甲が見える、#39)
+  bottom: { top: 42, left: 26, width: 48, height: 50, z: 1, fit: "width" },
+  shoes: { top: 86, left: 22, width: 56, height: 8, z: 2, fit: "box" },
   top: { top: 12.5, left: 16, width: 68, height: 36, z: 3, fit: "width" },
   dress: { top: 12.5, left: 16, width: 68, height: 56, z: 3, fit: "width" },
   outer: { top: 14.2, left: 13, width: 74, height: 42, z: 4, fit: "width" },
@@ -91,19 +92,26 @@ export function place(kind: string, ratio: number | null): Box | null {
   return { top: s.top, left: s.left, width: s.width, height: s.fit === "box" ? s.height : null };
 }
 
-/** 片足のくつの箱の大きさの上限 (%)。 */
-export const FOOT_BOX = { width: 13, height: 8 };
+/**
+ * 片足のくつの箱の大きさの上限 (%)。足 (BODY.footWidth) より一回り大きい (#39)。
+ * 縦長の写真でも幅は FOOT_MIN_WIDTH を下回らない (足より細い小さなかたまりにしない)。ただし高さは FOOT_MAX_HEIGHT まで。
+ */
+export const FOOT_BOX = { width: 16, height: 10 };
+export const FOOT_MIN_WIDTH = BODY.footWidth + 1.5;
+export const FOOT_MAX_HEIGHT = 2 * FOOT_BOX.height;
 
 /**
  * くつの写真 (2 足を並べて撮ったもの) を左右の半分に分け、それぞれを左右の足に置く箱 (#32)。
  * ratio は写真全体の 縦 ÷ 横 (分からなければ 2 足が正方形ずつ並んだ形とみなす)。
- * 半分の写真は曲げず、FOOT_BOX に収まる大きさにして、足の真ん中・足の裏にそろえる。
+ * 半分の写真は曲げず、FOOT_BOX に収まる大きさ (細すぎるなら FOOT_MIN_WIDTH) にして、足の真ん中・足の裏にそろえる。
  */
 export function shoeFeet(ratio: number | null): [Box, Box] {
   const half = ratio !== null && ratio > 0 ? 2 * ratio : 1; // 半分の 縦 ÷ 横
   // 高さ (%) = 幅 (%) × STAGE_RATIO × half
-  const width = Math.min(FOOT_BOX.width, FOOT_BOX.height / (STAGE_RATIO * half));
-  const height = width * STAGE_RATIO * half;
+  const k = STAGE_RATIO * half;
+  const fit = Math.min(FOOT_BOX.width, FOOT_BOX.height / k);
+  const width = Math.min(Math.max(fit, FOOT_MIN_WIDTH), FOOT_MAX_HEIGHT / k);
+  const height = width * k;
   const at = (cx: number): Box => ({ top: BODY.sole + 0.5 - height, left: cx - width / 2, width, height });
   return [at(BODY.feet[0]), at(BODY.feet[1])];
 }

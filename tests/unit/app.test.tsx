@@ -222,7 +222,7 @@ describe("ログインのあと: 今日の画面", () => {
     const stage = el.querySelector('[data-testid="stage"]') as HTMLElement;
     expect(stage.querySelectorAll('[data-testid="worn"]')).toHaveLength(5);
     expect(stage.querySelector('[data-testid="labels"]')).toBeNull();
-    expect(el.querySelector('[data-testid="labels"]')?.textContent).toBe("スニーカーデニム白T+2");
+    expect(el.querySelector('[data-testid="labels"]')?.textContent).toBe("デニムスニーカー白T+2"); // 重なりの順 (くつは裾より前、#39)
     expect(stage.className).toBe("stage");
   });
 
@@ -393,7 +393,7 @@ describe("クローゼットから着せる", () => {
     const el = await render();
     expect(el.querySelector('[data-testid="sparkle"]')).toBeNull();
     await click(el.querySelector('[aria-label="ニットを着る"]'));
-    expect(worn(el)).toEqual(["スニーカー", "デニム", "ニット"]);
+    expect(worn(el)).toEqual(["デニム", "スニーカー", "ニット"]); // 重なりの順 (#39)
     expect(el.querySelector('[data-testid="sparkle"]')).not.toBeNull();
     expect(el.querySelector('[aria-label="ニットを着る"]')?.getAttribute("aria-pressed")).toBe("true");
     await click(tab(el, "ワンピース"));
