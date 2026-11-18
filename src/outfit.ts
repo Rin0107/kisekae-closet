@@ -4,22 +4,50 @@
 import { average, targetWarmth, type Item } from "./recommend";
 import type { Weather } from "./weather";
 
-/** アバターの台の中で、種類ごとに服の写真を置く場所 (台に対する %)。重なりの順は z。 */
+/**
+ * アバターの台の中で、種類ごとに服の写真を置く場所 (台に対する %)。重なりの順は z。
+ * - fit "width": 写真の幅を width に合わせ、縦は写真の縦横比のまま (曲げない・縮めて細くしない)。丈は服しだいで、height は目安
+ * - fit "box": width × height の箱に収める (くつ・こもの)
+ */
 export interface Slot {
   top: number;
   left: number;
   width: number;
   height: number;
   z: number;
+  fit: "width" | "box";
 }
 
+/**
+ * 体の絵 (public/avatar/body.webp、400×800) の目印 (台に対する %)。絵の画素を測った値 (2026-11-19)。
+ * 下着 (白) は首の付け根から腰の下まで、幅は胸と腰で一番広い。腕は肩から斜め下に開く。
+ */
+export const BODY = {
+  /** 下着の上の端 (首の付け根)・下の端 (腰の下) */
+  neck: 16.3,
+  hip: 52,
+  /** 下着の左右の端 (一番広いところ) */
+  torsoLeft: 32.8,
+  torsoRight: 67,
+  /** 肩の高さ */
+  shoulder: 17.5,
+  /** 腕の外側の線: 肩 (shoulder の高さ) で torsoLeft、そこから下へ 1% ごとに外へ armSlope % 開く */
+  armSlope: 1.4,
+} as const;
+
+/**
+ * ハンガーにかけて撮ったトップスの、袖を除いた身ごろの幅が写真の幅に占める割合のうち、狭いほう (半袖を広げた形)。
+ * これでも胴を覆うように、トップスの幅を決める。
+ */
+export const BODICE_SHARE = 0.52;
+
 export const SLOTS: Record<string, Slot> = {
-  shoes: { top: 86, left: 31, width: 38, height: 12, z: 1 },
-  bottom: { top: 43, left: 30, width: 40, height: 45, z: 2 },
-  top: { top: 17, left: 25, width: 50, height: 31, z: 3 },
-  dress: { top: 17, left: 25, width: 50, height: 52, z: 3 },
-  outer: { top: 15, left: 19, width: 62, height: 42, z: 4 },
-  accessory: { top: 38, left: 68, width: 24, height: 17, z: 5 },
+  shoes: { top: 86, left: 31, width: 38, height: 12, z: 1, fit: "box" },
+  bottom: { top: 42, left: 26, width: 48, height: 50, z: 2, fit: "width" },
+  top: { top: 14, left: 16, width: 68, height: 36, z: 3, fit: "width" },
+  dress: { top: 14, left: 16, width: 68, height: 56, z: 3, fit: "width" },
+  outer: { top: 14, left: 13, width: 74, height: 42, z: 4, fit: "width" },
+  accessory: { top: 38, left: 72, width: 24, height: 17, z: 5, fit: "box" },
 };
 
 /** 一緒に着られない種類 (着ると外れる)。 */

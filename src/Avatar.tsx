@@ -8,7 +8,7 @@ import { Photo } from "./Photo";
 
 /**
  * 体の絵。CC0 の 3D の人体 (MakeHuman) を Blender で正面から描いたもの (public/avatar/LICENSE.md)。
- * repo の中に置き、外部から読まない。肩・腰・足首の位置は前の絵と同じ枠 (outfit.ts の SLOTS)。
+ * repo の中に置き、外部から読まない。服を置く場所は絵を測った目印に合わせる (outfit.ts の BODY・SLOTS)。
  */
 function Body() {
   return <img className="body" src="/avatar/body.webp" alt="" width={200} height={400} draggable={false} />;
@@ -19,17 +19,26 @@ export interface StageProps {
   /** 増えるたびにキラッと光る (0 なら光らない)。 */
   sparkle?: number;
   caption?: string;
+  /** 服の一覧が届くまで (#28): 下着姿を見せず、服の場所に淡い形を出す。 */
+  pending?: boolean;
 }
 
 /** アバターの台。ref は、ドラッグした服を落とす先の判定に使う。 */
 export const Stage = forwardRef<HTMLElement, StageProps>(function Stage(
-  { worn, sparkle = 0, caption = "着ている服" },
+  { worn, sparkle = 0, caption = "着ている服", pending = false },
   ref,
 ) {
   const names = worn.map((c) => c.label || "服").join("・");
   return (
-    <figure className="stage" ref={ref} data-testid="stage" aria-label={`${caption}: ${names || "なし"}`}>
+    <figure
+      className="stage"
+      ref={ref}
+      data-testid="stage"
+      aria-label={pending ? `${caption}: 読み込み中` : `${caption}: ${names || "なし"}`}
+      aria-busy={pending || undefined}
+    >
       <Body />
+      {pending && <span className="wear-pending" data-testid="wear-pending" aria-hidden="true" />}
       {worn.map((c) => {
         const s = SLOTS[c.kind];
         if (s === undefined) return null;
@@ -46,7 +55,8 @@ export const Stage = forwardRef<HTMLElement, StageProps>(function Stage(
               top: `${s.top}%`,
               left: `${s.left}%`,
               width: `${s.width}%`,
-              height: `${s.height}%`,
+              // 幅で合わせ、縦は写真のまま (曲げない)。箱に収めるのはくつ・こものだけ
+              height: s.fit === "box" ? `${s.height}%` : "auto",
               zIndex: s.z,
             }}
           />

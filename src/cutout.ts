@@ -13,27 +13,40 @@ export interface Box {
 export const TOLERANCE = 48 * 48 * 3;
 
 /**
- * px (RGBA) の背景を透明にする。背景の色は四辺の画素の平均。四辺から、背景の色に近い画素を塗りつぶしでたどる。
- * 残った (服の) 画素を囲む箱を返す。全部が背景なら null (切り抜かない: px は元のまま)。
+ * 服が写真のこの割合より小さくしか残らなければ、背景と服の色が近すぎて服まで消えたとみなし、
+ * 背景のばらつきから決めた狭い差 (tight) でやり直す (白い背景の白いシャツ、#27)。
  */
-export function cutout(px: Uint8ClampedArray, w: number, h: number, tol = TOLERANCE): Box | null {
-  const n = w * h;
-  let r = 0;
-  let g = 0;
-  let b = 0;
-  let k = 0;
+export const MIN_KEEP = 0.15;
+/** やり直しの差の下限 (RGB の距離の 2 乗)。むらのない背景でも、これくらいの差は背景とみなす。 */
+export const TIGHT_MIN = 8 * 8 * 3;
+
+/** 四辺の画素の平均の色と、ばらつき (各色の分散の和)。 */
+function borderStats(px: Uint8ClampedArray, w: number, h: number) {
   const border: number[] = [];
   for (let x = 0; x < w; x++) border.push(x, (h - 1) * w + x);
   for (let y = 1; y < h - 1; y++) border.push(y * w, y * w + w - 1);
-  for (const i of border) {
-    r += px[i * 4] as number;
-    g += px[i * 4 + 1] as number;
-    b += px[i * 4 + 2] as number;
-    k++;
+  const mean = [0, 0, 0];
+  const sq = [0, 0, 0];
+  for (const i of border)
+    for (let c = 0; c < 3; c++) {
+      const v = px[i * 4 + c] as number;
+      mean[c] = (mean[c] as number) + v;
+      sq[c] = (sq[c] as number) + v * v;
+    }
+  const k = border.length;
+  let spread = 0;
+  for (let c = 0; c < 3; c++) {
+    const m = (mean[c] as number) / k;
+    mean[c] = m;
+    spread += Math.max(0, (sq[c] as number) / k - m * m);
   }
-  r /= k;
-  g /= k;
-  b /= k;
+  return { border, mean: mean as [number, number, number], spread };
+}
+
+/** 四辺から、背景の色 (平均) との差が tol 以下の画素をたどった印 (1 が背景) と、背景の画素の数。 */
+function flood(px: Uint8ClampedArray, w: number, h: number, st: ReturnType<typeof borderStats>, tol: number) {
+  const n = w * h;
+  const [r, g, b] = st.mean;
   const near = (i: number) => {
     const dr = (px[i * 4] as number) - r;
     const dg = (px[i * 4 + 1] as number) - g;
@@ -44,7 +57,7 @@ export function cutout(px: Uint8ClampedArray, w: number, h: number, tol = TOLERA
   const queue = new Int32Array(n);
   let head = 0;
   let tail = 0;
-  for (const i of border)
+  for (const i of st.border)
     if (bg[i] === 0 && near(i)) {
       bg[i] = 1;
       queue[tail++] = i;
@@ -59,7 +72,25 @@ export function cutout(px: Uint8ClampedArray, w: number, h: number, tol = TOLERA
         queue[tail++] = j;
       }
   }
-  if (tail === n) return null;
+  return { bg, count: tail };
+}
+
+/**
+ * px (RGBA) の背景を透明にする。背景の色は四辺の画素の平均。四辺から、背景の色に近い画素を塗りつぶしでたどる。
+ * 服がほとんど残らなければ (MIN_KEEP)、背景のばらつきの 3 倍 (下限 TIGHT_MIN) までの差でやり直し、服が多く残るほうを使う。
+ * 残った (服の) 画素を囲む箱を返す。全部が背景なら null (切り抜かない: px は元のまま)。
+ */
+export function cutout(px: Uint8ClampedArray, w: number, h: number, tol = TOLERANCE): Box | null {
+  const n = w * h;
+  const st = borderStats(px, w, h);
+  let m = flood(px, w, h, st, tol);
+  if (n - m.count < n * MIN_KEEP) {
+    const tight = Math.min(tol, Math.max(TIGHT_MIN, 9 * st.spread));
+    const e = flood(px, w, h, st, tight);
+    if (e.count < m.count) m = e;
+  }
+  const { bg, count } = m;
+  if (count === n) return null;
   let x0 = w;
   let y0 = h;
   let x1 = -1;
@@ -82,20 +113,45 @@ export function cutout(px: Uint8ClampedArray, w: number, h: number, tol = TOLERA
 /** 切り抜く前に縮める大きさ (長辺)。 */
 export const CUT_SIDE = 512;
 
-async function render(src: string): Promise<string> {
+/** 端末の中の写真 (選んだばかりの写真の下見)。 */
+export const isLocal = (src: string) => src.startsWith("blob:") || src.startsWith("data:");
+
+/**
+ * 写真を描ける形で読む。blob:・data: は fetch しない: CSP の connect-src に blob: はなく (足さない)、
+ * fetch すると CSP 違反になる (#25)。img-src は blob: を許すので <img> で読む。サーバーの写真は同じ origin から fetch する。
+ */
+async function decode(
+  src: string,
+): Promise<{ img: CanvasImageSource; w: number; h: number; done: () => void } | null> {
+  if (isLocal(src)) {
+    const img = new Image();
+    img.src = src;
+    await img.decode();
+    return { img, w: img.naturalWidth, h: img.naturalHeight, done: () => undefined };
+  }
   const res = await fetch(src, { credentials: "same-origin" });
-  if (!res.ok) return src;
-  const img = await createImageBitmap(await res.blob());
-  const s = Math.min(1, CUT_SIDE / Math.max(img.width, img.height));
-  const w = Math.max(1, Math.round(img.width * s));
-  const h = Math.max(1, Math.round(img.height * s));
+  if (!res.ok) return null;
+  const bmp = await createImageBitmap(await res.blob());
+  return { img: bmp, w: bmp.width, h: bmp.height, done: () => bmp.close() };
+}
+
+async function render(src: string): Promise<string> {
+  const d = await decode(src);
+  if (d === null) return src;
+  const { img } = d;
+  const s = Math.min(1, CUT_SIDE / Math.max(d.w, d.h));
+  const w = Math.max(1, Math.round(d.w * s));
+  const h = Math.max(1, Math.round(d.h * s));
   const c = document.createElement("canvas");
   c.width = w;
   c.height = h;
   const g = c.getContext("2d");
-  if (g === null) return src;
+  if (g === null) {
+    d.done();
+    return src;
+  }
   g.drawImage(img, 0, 0, w, h);
-  img.close();
+  d.done();
   const data = g.getImageData(0, 0, w, h);
   const box = cutout(data.data, w, h);
   if (box === null) return src;

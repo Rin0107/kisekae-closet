@@ -89,9 +89,17 @@ async function stash(page: Page, kind: string, label: string, warmth: number, pn
   await page.getByRole("navigation", { name: "画面" }).getByRole("button", { name: "クローゼット" }).click();
   await page.getByRole("group", { name: "種類" }).getByRole("button", { name: kind }).click();
   await expect(page.getByTestId("guide")).toBeVisible();
+  // AC-27-3: 撮り方の案内に背景の色のこと
+  await expect(page.getByTestId("guide-bg")).toContainText("背景は服と違う色");
   await page
     .getByLabel("写真", { exact: true })
     .setInputFiles({ name: "a.png", mimeType: "image/png", buffer: png });
+  // AC-25-1: 下見は切り抜かれて出る (白い背景の 300×300 から、服のところだけの大きさになる)
+  const preview = page.getByAltText("選んだ写真");
+  await expect
+    .poll(() => preview.evaluate((i: HTMLImageElement) => (i.complete ? i.naturalWidth : 0)))
+    .toBeGreaterThan(0);
+  await expect.poll(() => preview.evaluate((i: HTMLImageElement) => i.naturalWidth)).toBeLessThan(300);
   await page.getByRole("button", { name: `暖かさ ${warmth}` }).click();
   await page.getByLabel("ラベル").fill(label);
   await page.getByRole("button", { name: "クローゼットにしまう" }).click();
@@ -125,13 +133,23 @@ test("AC-21-1: 2 回目に開くと、Open-Meteo が 3 秒遅れても 2 秒以�
   await expect(page.getByTestId("weather-old")).toHaveCount(0, { timeout: 5000 });
 });
 
-test("AC-7-5 AC-9-2 AC-22-3: 服をしまい、着せ替えて、今日のコーデに決めると、カレンダーに載る。先の日の分も決めておける", async ({
+test("AC-7-5 AC-9-2 AC-22-3 AC-25-1 AC-25-2 AC-27-3 AC-28-1 AC-28-2 AC-29-2: 服をしまい、着せ替えて、今日のコーデに決めると、カレンダーに載る。先の日の分も決めておける", async ({
   page,
   baseURL,
 }) => {
   test.skip(baseURL?.startsWith("https://") === true, "本番・プレビューにはアカウントを作らない");
   await page.setViewportSize({ width: 390, height: 844 });
   await authenticator(page);
+  // AC-25-2: どの画面でも CSP 違反を数える (最後に 0)
+  await page.addInitScript(() => {
+    const w = window as unknown as { cspViolations: string[] };
+    w.cspViolations = [];
+    document.addEventListener("securitypolicyviolation", (e) =>
+      w.cspViolations.push(`${e.violatedDirective} ${e.blockedURI}`),
+    );
+  });
+  const violations = () =>
+    page.evaluate(() => (window as unknown as { cspViolations: string[] }).cspViolations);
   const now = new Date();
   await page.route("https://api.open-meteo.com/**", (r) => r.fulfill({ json: forecast(now) }));
   await page.goto("./");
@@ -176,6 +194,32 @@ test("AC-7-5 AC-9-2 AC-22-3: 服をしまい、着せ替えて、今日のコー
   await page.getByRole("button", { name: "これに決めた" }).click();
   await expect(page.getByTestId("stamp")).toBeVisible();
   await page.screenshot({ path: "test-results/decided.png", fullPage: true });
+  await stage.screenshot({ path: shot("avatar") }); // #26: 服が体を覆っているか、目で見る絵
+
+  // AC-29-2: 幅 360px でも、天気のまとまり (気温・湿度・雨) の途中で折り返さない
+  await page.setViewportSize({ width: 360, height: 800 });
+  for (const part of await page.getByTestId("weather").locator(".nb").all())
+    // 行の数 (矩形の上端の種類)。React の文字のかたまりごとに矩形が出るので、数ではなく行で見る
+    expect(
+      await part.evaluate((e) => new Set([...e.getClientRects()].map((r) => Math.round(r.top))).size),
+    ).toBe(1);
+  await page.setViewportSize({ width: 390, height: 844 });
+
+  expect(await violations()).toEqual([]); // AC-25-2: 服をしまう・今日・着せ替えの画面 (読み直すと数え直しになる)
+
+  // AC-28-1 AC-28-2: 再読み込みして服が届くまで、ゲージは寒いを示さず、下着だけの姿を見せない
+  await page.route("**/api/clothes", async (r) => {
+    await new Promise((ok) => setTimeout(ok, 1500));
+    await r.continue().catch(() => {});
+  });
+  await page.reload();
+  await expect(page.getByTestId("wear-pending")).toBeVisible();
+  await expect(page.getByTestId("gauge")).toHaveAttribute("data-band", "loading");
+  await expect(stage.getByTestId("worn")).toHaveCount(0);
+  await expect(stage.getByTestId("worn")).not.toHaveCount(0, { timeout: 5000 });
+  await expect(page.getByTestId("wear-pending")).toHaveCount(0);
+  await expect(page.getByTestId("gauge")).not.toHaveAttribute("data-band", "loading");
+  await page.unroute("**/api/clothes");
 
   // 3 日先の日のコーデを先に決めておく
   const ahead = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 3);
@@ -202,4 +246,5 @@ test("AC-7-5 AC-9-2 AC-22-3: 服をしまい、着せ替えて、今日のコー
   }
   await expect(page.getByTestId("day-stamp")).toHaveCount(1);
   await page.screenshot({ path: shot("calendar") });
+  expect(await violations()).toEqual([]); // AC-25-2
 });

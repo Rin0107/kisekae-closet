@@ -26,3 +26,14 @@ test("#root に描く (ログインの前の画面)", async () => {
 test("#root がなければ止まる", async () => {
   await expect(import("../../src/main")).rejects.toThrow("#root がない");
 });
+
+test("AC-25-2: zod の JIT を切る (new Function の下調べが CSP 違反として報告されないように)", async () => {
+  const root = document.createElement("div");
+  root.id = "root";
+  document.body.appendChild(root);
+  await act(async () => {
+    await import("../../src/main");
+  });
+  const { globalConfig } = await import("zod/v4/core");
+  expect(globalConfig.jitless).toBe(true);
+});

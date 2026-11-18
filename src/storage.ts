@@ -34,7 +34,11 @@ export function forget(key: string): void {
 
 /** このアプリが保存したものを全部消す (「データを消す」ボタン用)。 */
 export function clearAll(): void {
-  for (const k of Object.keys(localStorage)) {
-    if (k.startsWith(PREFIX)) localStorage.removeItem(k);
+  try {
+    for (const k of Object.keys(localStorage)) {
+      if (k.startsWith(PREFIX)) localStorage.removeItem(k);
+    }
+  } catch {
+    // 読めない端末 (プライベートモードなど): もともと何も置けていない
   }
 }

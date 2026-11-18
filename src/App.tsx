@@ -19,7 +19,7 @@ import { BAND_NAMES, dressIn, gauge, wear } from "./outfit";
 import { login, register } from "./passkey";
 import { recommend } from "./recommend";
 import { shrinkPhoto } from "./shrink";
-import { forget, load, save } from "./storage";
+import { clearAll, forget, load, save } from "./storage";
 import { applyTheme, DEFAULT_THEME, ThemeId, themeById, THEMES } from "./theme";
 import { canPlan, CITIES, fetchForecast, fromSaved, SavedForecast, toSaved, type Weather } from "./weather";
 
@@ -142,6 +142,8 @@ const TABS: { id: Tab; name: string }[] = [
 function Home({ first, onOut }: { first: FirstForecast | null; onOut: () => void }) {
   const [clothes, setClothes] = useState<Clothing[]>([]);
   const [outfits, setOutfits] = useState<Outfit[]>([]);
+  // 服とコーデが 1 度届くまでは、アバターを下着姿にせず、ゲージも寒いにしない (#28)
+  const [loaded, setLoaded] = useState(false);
   const [city, setCity] = useState(() => load("city", City, "tokyo"));
   // 前回の予報があれば、読み終わるのを待たずにまずそれを出す (#21)
   const [wx, setWx] = useState<Wx | null>(() => cachedWx(city));
@@ -158,10 +160,17 @@ function Home({ first, onOut }: { first: FirstForecast | null; onOut: () => void
     [onOut],
   );
   const reload = useCallback(() => {
-    Promise.all([api.clothes(), api.outfits()]).then(([c, o]) => {
-      setClothes(c);
-      setOutfits(o);
-    }, fail);
+    Promise.all([api.clothes(), api.outfits()]).then(
+      ([c, o]) => {
+        setClothes(c);
+        setOutfits(o);
+        setLoaded(true);
+      },
+      (e: unknown) => {
+        setLoaded(true);
+        fail(e);
+      },
+    );
   }, [fail]);
   useEffect(reload, [reload]);
   useEffect(() => {
@@ -255,7 +264,11 @@ function Home({ first, onOut }: { first: FirstForecast | null; onOut: () => void
                 <p className="weather">
                   <SkyIcon sky={sky(weather)} />
                   <span data-testid="weather">
-                    {weather.tempMax}℃ / {weather.tempMin}℃・湿度 {weather.humidity}%・雨 {weather.precip}mm
+                    <span className="nb">
+                      {weather.tempMax}℃ / {weather.tempMin}℃
+                    </span>
+                    ・<span className="nb">湿度 {weather.humidity}%</span>・
+                    <span className="nb">雨 {weather.precip}mm</span>
                   </span>
                   {old && (
                     <span className="muted wx-old" data-testid="weather-old">
@@ -291,6 +304,7 @@ function Home({ first, onOut }: { first: FirstForecast | null; onOut: () => void
             </header>
             <Dresser
               clothes={clothes}
+              pending={!loaded}
               worn={current}
               sparkle={sparkle}
               onWear={(c) => put(wear(current, c))}
@@ -346,7 +360,12 @@ function Home({ first, onOut }: { first: FirstForecast | null; onOut: () => void
               className="ghost danger"
               onClick={() => {
                 if (confirm("アカウントと全データを消します。よろしいですか?"))
-                  api.deleteAccount().then(onOut, onOut);
+                  api.deleteAccount().then(() => {
+                    // 端末に置いたもの (市・テーマ・前回の予報) も残さない (#29)
+                    clearAll();
+                    applyTheme(themeById(DEFAULT_THEME));
+                    onOut();
+                  }, onOut);
               }}
             >
               アカウントと全データを消す
@@ -430,7 +449,31 @@ function LabelRow({ worn }: { worn: Clothing[] }) {
   );
 }
 
-function GaugeView({ worn, weather }: { worn: Clothing[]; weather: Weather }) {
+function GaugeView({ worn, weather }: { worn: Clothing[]; weather: Weather | null }) {
+  // 天気か服がまだ届いていないあいだは、つまみを出さない (寒いと言わない、#28)
+  if (weather === null)
+    return (
+      <div
+        className="gauge"
+        data-testid="gauge"
+        data-band="loading"
+        role="group"
+        aria-label="暖かさ"
+        aria-busy="true"
+      >
+        <div className="gauge-track" aria-hidden="true">
+          <span className="cold" />
+          <span className="ok" />
+          <span className="hot" />
+        </div>
+        <div className="gauge-words" aria-hidden="true">
+          <span>寒い</span>
+          <span>ちょうどいい</span>
+          <span>暑い</span>
+        </div>
+        <p className="gauge-word muted">暖かさ: 服を読んでいます…</p>
+      </div>
+    );
   const g = gauge(worn, weather);
   return (
     <div className="gauge" data-testid="gauge" data-band={g.band} role="group" aria-label="暖かさ">
@@ -455,6 +498,7 @@ function GaugeView({ worn, weather }: { worn: Clothing[]; weather: Weather }) {
 /** 今日の着せ替え: アバターの台・ラベル・ゲージ・決めるボタン・クローゼットの棚。 */
 function Dresser({
   clothes,
+  pending,
   worn,
   sparkle,
   onWear,
@@ -465,6 +509,8 @@ function Dresser({
   onGoCloset,
 }: {
   clothes: Clothing[];
+  /** 服の一覧がまだ届いていない */
+  pending: boolean;
   worn: Clothing[];
   sparkle: number;
   onWear: (c: Clothing) => void;
@@ -516,7 +562,7 @@ function Dresser({
   return (
     <>
       <div className="stage-wrap">
-        <Stage ref={stage} worn={worn} sparkle={sparkle} />
+        <Stage ref={stage} worn={worn} sparkle={sparkle} pending={pending} />
         {stamp && (
           <span className="stamp" data-testid="stamp">
             決めた!
@@ -524,7 +570,7 @@ function Dresser({
         )}
       </div>
       <LabelRow worn={worn} />
-      {weather && <GaugeView worn={worn} weather={weather} />}
+      {(weather || pending) && <GaugeView worn={worn} weather={pending ? null : weather} />}
       <div className="decide-row">
         {decide}
         {stamp && <p className="muted">{stampNote}</p>}
@@ -543,7 +589,9 @@ function Dresser({
             </button>
           ))}
         </div>
-        {clothes.length === 0 ? (
+        {pending ? (
+          <p className="empty muted">服を読んでいます…</p>
+        ) : clothes.length === 0 ? (
           <div className="empty">
             <p>まだ服がありません。クローゼットに服をしまうと、ここから着せられます。</p>
             <button type="button" className="primary" onClick={onGoCloset}>
@@ -666,6 +714,7 @@ function ClosetRoom({
           </div>
           <p className="guide" data-testid="guide">
             ハンガーにかけて、正面からまっすぐ撮ってください。服が枠に収まるように (顔や部屋は写さない)。
+            <span data-testid="guide-bg">背景は服と違う色に (白い服なら色のある壁や布の前で)。</span>
           </p>
           <label className="file">
             写真を撮る・選ぶ

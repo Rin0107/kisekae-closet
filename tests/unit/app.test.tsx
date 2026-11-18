@@ -189,7 +189,7 @@ describe("ログインのあと: 今日の画面", () => {
     expect(worn(el)).toEqual(["白T", "デニム", "スニーカー"]);
     const img = el.querySelector('[data-testid="worn"]') as HTMLImageElement;
     expect(img.getAttribute("src")).toBe("/api/clothes/t1/photo");
-    expect(img.style.top).toBe("17%");
+    expect(img.style.top).toBe("14%");
     expect(el.querySelector('[data-testid="labels"]')?.textContent).toBe("白Tデニムスニーカー");
   });
 
@@ -983,5 +983,85 @@ describe("アカウント", () => {
     expect(Object.keys(KIND_NAMES)).toEqual(["top", "bottom", "outer", "dress", "shoes", "accessory"]);
     expect(shelfOf("dress")).toBe("top");
     expect(shelfOf("hat")).toBe("top");
+  });
+});
+
+describe("開いた瞬間の絵 (#28)", () => {
+  test("AC-28-1 AC-28-2: 服の一覧が届くまで、ゲージは寒いを示さず、アバターは下着だけの姿で出ない", async () => {
+    let release = () => {};
+    const gate = new Promise<void>((ok) => {
+      release = ok;
+    });
+    const inner = fetch;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: { method?: string }) => {
+        if (url === "/api/clothes" && (init?.method ?? "GET") === "GET") await gate;
+        return inner(url, init);
+      }),
+    );
+    const el = await render();
+    const g = el.querySelector('[data-testid="gauge"]') as HTMLElement;
+    expect(g.dataset.band).toBe("loading");
+    expect(el.querySelector('[data-testid="gauge-thumb"]')).toBeNull();
+    expect(g.textContent).toContain("服を読んでいます");
+    const stage = el.querySelector('[data-testid="stage"]') as HTMLElement;
+    expect(stage.querySelector('[data-testid="wear-pending"]')).not.toBeNull();
+    expect(stage.getAttribute("aria-busy")).toBe("true");
+    expect(el.textContent).not.toContain("まだ服がありません");
+    expect(button(el, "これに決めた")).toBeUndefined();
+    await act(async () => release());
+    await act(async () => {});
+    expect((el.querySelector('[data-testid="gauge"]') as HTMLElement).dataset.band).toBe("ok");
+    expect(stage.querySelector('[data-testid="wear-pending"]')).toBeNull();
+    expect(worn(el)).toEqual(["白T", "デニム", "スニーカー"]);
+  });
+
+  test("服の一覧が読めなくても、読み込み中のままにしない", async () => {
+    routes.clothes = () => [500, { error: "x" }];
+    const el = await render();
+    expect(el.querySelector('[data-testid="wear-pending"]')).toBeNull();
+    expect(el.querySelector('[role="alert"]')).not.toBeNull();
+  });
+});
+
+describe("細かい見た目と後始末 (#29)", () => {
+  test("AC-29-1: カレンダーで選んだ日は枠で示し、背景を凡例の色 (ピンク) にしない", () => {
+    const css = readFileSync("src/style.css", "utf8");
+    const rule = /\.day\[aria-pressed="true"\] \{([^}]*)\}/.exec(css)?.[1] ?? "";
+    expect(rule).toContain("background: transparent");
+    expect(rule).toContain("box-shadow: inset 0 0 0 2px");
+    expect(rule).not.toMatch(/--c-(primary-soft|same|near)/);
+    // 似た天気の日を選んでも、その日の背景 (凡例の色) は変えない
+    expect(css).toMatch(/\.day\.same\[aria-pressed="true"\] \{\s*background: var\(--c-same\);/);
+    expect(css).toMatch(/\.day\.near\[aria-pressed="true"\] \{\s*background: var\(--c-near\);/);
+  });
+
+  test("AC-29-2: 天気の行は、気温・湿度・雨のまとまりの途中で折り返さない", async () => {
+    const el = await render();
+    const w = el.querySelector('[data-testid="weather"]') as HTMLElement;
+    expect([...w.querySelectorAll(".nb")].map((s) => s.textContent)).toEqual([
+      "30℃ / 24℃",
+      "湿度 60%",
+      "雨 0mm",
+    ]);
+    expect(/\.nb \{([^}]*)\}/.exec(readFileSync("src/style.css", "utf8"))?.[1]).toContain(
+      "white-space: nowrap",
+    );
+  });
+
+  test("AC-29-3: アカウントと全データを消すと、端末のこのアプリのキー (市・テーマ・前回の予報) も残らない", async () => {
+    vi.stubGlobal("confirm", () => true);
+    localStorage.setItem("kisekae-closet:theme", JSON.stringify("mint"));
+    localStorage.setItem("other-app", "1");
+    const el = await render();
+    await click(button(el, "クローゼット"));
+    expect(Object.keys(localStorage).filter((k) => k.startsWith("kisekae-closet:"))).toContain(
+      "kisekae-closet:city",
+    );
+    await click(button(el, "アカウントと全データを消す"));
+    expect(calls).toContain("DELETE account");
+    expect(Object.keys(localStorage).filter((k) => k.startsWith("kisekae-closet:"))).toEqual([]);
+    expect(localStorage.getItem("other-app")).toBe("1");
   });
 });
