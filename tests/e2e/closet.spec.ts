@@ -125,7 +125,7 @@ test("AC-21-1: 2 回目に開くと、Open-Meteo が 3 秒遅れても 2 秒以�
   await expect(page.getByTestId("weather-old")).toHaveCount(0, { timeout: 5000 });
 });
 
-test("AC-7-5 AC-9-2: 服をしまい、着せ替えて、今日のコーデに決めると、カレンダーに載る。先の日の分も決めておける", async ({
+test("AC-7-5 AC-9-2 AC-22-3: 服をしまい、着せ替えて、今日のコーデに決めると、カレンダーに載る。先の日の分も決めておける", async ({
   page,
   baseURL,
 }) => {
@@ -148,6 +148,9 @@ test("AC-7-5 AC-9-2: 服をしまい、着せ替えて、今日のコーデに�
   await page.getByRole("navigation", { name: "画面" }).getByRole("button", { name: "今日" }).click();
   const stage = page.getByTestId("stage");
   await expect(stage.getByTestId("worn")).not.toHaveCount(0);
+  // AC-22-3: 体の絵 (自分の origin の WebP) が読めている
+  const body = stage.locator("img.body");
+  await expect.poll(() => body.evaluate((i: HTMLImageElement) => i.complete && i.naturalWidth)).toBe(400);
   const size = await stage.boundingBox();
   await page.screenshot({ path: shot("today") });
 

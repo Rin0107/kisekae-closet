@@ -183,6 +183,8 @@ input {
   overflow: hidden;
 }
 .stage .body {
+  object-fit: contain;
+  pointer-events: none;
   position: absolute;
   inset: 0;
   width: 100%;
