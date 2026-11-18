@@ -453,9 +453,19 @@ input {
 }
 .file {
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--sp-2);
   font-size: var(--fs-s);
+}
+/* 見出しは折り返さない。入らなければ、ファイルの欄のほうが次の行に回る (#41) */
+.file-title {
+  flex: none;
+  white-space: nowrap;
+}
+.file input {
+  min-width: 0;
+  max-width: 100%;
 }
 .warmth {
   display: flex;
@@ -610,6 +620,15 @@ input {
   overflow: hidden;
   pointer-events: none;
 }
+/* 切り分けた服の片 (袖・身ごろ、#37 #38)。片の外は見せない。写真は片の幅の何倍かで、曲げない */
+.wear-piece {
+  position: absolute;
+  overflow: hidden;
+  pointer-events: none;
+}
+.wear-piece .wear {
+  max-width: none;
+}
 .wear-foot .wear-shoes {
   max-width: none;
   object-position: 50% 100%;
@@ -714,5 +733,24 @@ input {
   :root {
     --stage-w: 280px;
     --stage-h: 560px;
+  }
+}
+
+/* 広い画面: 今日の画面は台を左に、ゲージ・決めるボタン・棚を右に並べる (#40)。台の大きさは変えない */
+@media (min-width: 768px) {
+  main {
+    max-width: 60rem;
+  }
+  .dresser {
+    display: grid;
+    grid-template-columns: var(--stage-w) minmax(0, 1fr);
+    gap: var(--sp-4);
+    align-items: start;
+  }
+  .dresser .stage-wrap {
+    margin: 0;
+  }
+  .dresser-side .closet {
+    margin-top: var(--sp-2);
   }
 }

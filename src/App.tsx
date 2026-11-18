@@ -583,7 +583,7 @@ function Dresser({
   const kinds = SHELVES.find((s) => s.id === shelf)?.kinds ?? [];
   const onShelf = clothes.filter((c) => kinds.includes(c.kind));
   return (
-    <>
+    <div className="dresser">
       <div className="stage-wrap">
         <Stage ref={stage} worn={worn} sparkle={sparkle} pending={pending} />
         {stamp && (
@@ -592,64 +592,67 @@ function Dresser({
           </span>
         )}
       </div>
-      <LabelRow worn={worn} />
-      {(weather || pending) && <GaugeView worn={worn} weather={pending ? null : weather} />}
-      <div className="decide-row">
-        {decide}
-        {stamp && <p className="muted">{stampNote}</p>}
-      </div>
-      <section aria-label="クローゼット" className="closet">
-        <div role="tablist" aria-label="服の種類" className="shelves">
-          {SHELVES.map((s) => (
-            <button
-              key={s.id}
-              type="button"
-              role="tab"
-              aria-selected={shelf === s.id}
-              onClick={() => setShelf(s.id)}
-            >
-              {s.name}
-            </button>
-          ))}
+      {/* 広い画面では台の右に並べる (#40)。狭い画面では台の下に続く */}
+      <div className="dresser-side">
+        <LabelRow worn={worn} />
+        {(weather || pending) && <GaugeView worn={worn} weather={pending ? null : weather} />}
+        <div className="decide-row">
+          {decide}
+          {stamp && <p className="muted">{stampNote}</p>}
         </div>
-        {pending ? (
-          <p className="empty muted">服を読んでいます…</p>
-        ) : clothes.length === 0 ? (
-          <div className="empty">
-            <p>まだ服がありません。クローゼットに服をしまうと、ここから着せられます。</p>
-            <button type="button" className="primary" onClick={onGoCloset}>
-              服をしまう
-            </button>
-          </div>
-        ) : onShelf.length === 0 ? (
-          <p className="empty muted">この棚はからっぽです</p>
-        ) : (
-          <ul className="rack" role="tabpanel" data-testid="rack">
-            {onShelf.map((c) => (
-              <li key={c.id}>
-                <button
-                  type="button"
-                  className="garment"
-                  data-testid="garment"
-                  aria-pressed={worn.some((w) => w.id === c.id)}
-                  aria-label={`${nameOf(c)}を着る`}
-                  onPointerDown={down}
-                  onPointerMove={move(c)}
-                  onPointerUp={up(c)}
-                  onPointerCancel={() => {
-                    start.current = null;
-                    setDrag(null);
-                  }}
-                  onClick={tap(c)}
-                >
-                  <Photo src={api.photoUrl(c.id)} alt="" />
-                  <span className="garment-label">{nameOf(c)}</span>
-                </button>
-              </li>
+        <section aria-label="クローゼット" className="closet">
+          <div role="tablist" aria-label="服の種類" className="shelves">
+            {SHELVES.map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                role="tab"
+                aria-selected={shelf === s.id}
+                onClick={() => setShelf(s.id)}
+              >
+                {s.name}
+              </button>
             ))}
-          </ul>
-        )}
-      </section>
+          </div>
+          {pending ? (
+            <p className="empty muted">服を読んでいます…</p>
+          ) : clothes.length === 0 ? (
+            <div className="empty">
+              <p>まだ服がありません。クローゼットに服をしまうと、ここから着せられます。</p>
+              <button type="button" className="primary" onClick={onGoCloset}>
+                服をしまう
+              </button>
+            </div>
+          ) : onShelf.length === 0 ? (
+            <p className="empty muted">この棚はからっぽです</p>
+          ) : (
+            <ul className="rack" role="tabpanel" data-testid="rack">
+              {onShelf.map((c) => (
+                <li key={c.id}>
+                  <button
+                    type="button"
+                    className="garment"
+                    data-testid="garment"
+                    aria-pressed={worn.some((w) => w.id === c.id)}
+                    aria-label={`${nameOf(c)}を着る`}
+                    onPointerDown={down}
+                    onPointerMove={move(c)}
+                    onPointerUp={up(c)}
+                    onPointerCancel={() => {
+                      start.current = null;
+                      setDrag(null);
+                    }}
+                    onClick={tap(c)}
+                  >
+                    <Photo src={api.photoUrl(c.id)} alt="" />
+                    <span className="garment-label">{nameOf(c)}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      </div>
       {drag && (
         <Photo
           className="ghost-drag"
@@ -660,7 +663,7 @@ function Dresser({
           style={{ left: drag.x, top: drag.y }}
         />
       )}
-    </>
+    </div>
   );
 }
 
@@ -740,7 +743,7 @@ function ClosetRoom({
             <span data-testid="guide-bg">背景は服と違う色に (白い服なら色のある壁や布の前で)。</span>
           </p>
           <label className="file">
-            写真を撮る・選ぶ
+            <span className="file-title">写真を撮る・選ぶ</span>
             <input
               type="file"
               accept="image/*"

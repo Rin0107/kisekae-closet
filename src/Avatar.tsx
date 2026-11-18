@@ -1,9 +1,9 @@
 // アバターの台。正面に固定したすらっとした等身の姿 (写真に近い 3D の絵、#22) に、服の写真をそのまま (曲げずに) 重ねる。
 // 台の大きさは CSS で固定 (--stage-w・--stage-h)。中身の数で変わらない。
-// 顔写真は使わない。回さない (idea.md の「デザイン」)。
+// 顔写真は使わない。体は回さない (idea.md の「デザイン」)。服の袖は切り分けて腕の向きに置く (#37)。
 import { forwardRef, useState, type SyntheticEvent } from "react";
 import { api, type Clothing } from "./client";
-import { place, shoeFeet, SLOTS, type Box } from "./outfit";
+import { measureSleeve, pieces, place, shoeFeet, SLOTS, STAGE_RATIO, type Box, type Sleeve } from "./outfit";
 import { Photo } from "./Photo";
 
 /**
@@ -34,11 +34,86 @@ function useRatio(): [number | null, (e: SyntheticEvent<HTMLImageElement>) => vo
   return [ratio, onLoad];
 }
 
+/** 袖を切り分けて腕に沿わせる種類 (#37)。ワンピースは袖なしが多く、裾まで袖の帯に入るので、そのまま。 */
+const SLEEVED = new Set(["top", "outer"]);
+
+/** 測る絵の大きさの上限 (px)。小さく描いて画素を読む。 */
+const MEASURE_SIDE = 96;
+
+/** 読めた写真の、左右の袖の形 (#37)。読めない (canvas がない・読めない) なら null。 */
+function sleevesOf(img: HTMLImageElement): [Sleeve | null, Sleeve | null] | null {
+  const { naturalWidth: nw, naturalHeight: nh } = img;
+  if (nw <= 0 || nh <= 0) return null;
+  const k = Math.min(1, MEASURE_SIDE / Math.max(nw, nh));
+  const w = Math.max(1, Math.round(nw * k));
+  const h = Math.max(1, Math.round(nh * k));
+  try {
+    const cv = document.createElement("canvas");
+    cv.width = w;
+    cv.height = h;
+    const g = cv.getContext("2d");
+    if (g === null) return null;
+    g.drawImage(img, 0, 0, w, h);
+    const px = g.getImageData(0, 0, w, h).data;
+    const a = (x: number, y: number) => (px[(y * w + x) * 4 + 3] ?? 0) > 128;
+    return [measureSleeve(a, w, h), measureSleeve((x, y) => a(w - 1 - x, y), w, h)];
+  } catch {
+    return null;
+  }
+}
+
 /** 服 1 枚。幅で合わせ、縦は写真のまま (曲げない)。ボトムスは丈から幅を決める (#33)。 */
-function Worn({ item: c }: { item: Clothing }) {
-  const [ratio, onLoad] = useRatio();
+function Worn({ item: c, open = false }: { item: Clothing; open?: boolean }) {
+  const [ratio, onRatio] = useRatio();
+  const [sleeves, setSleeves] = useState<[Sleeve | null, Sleeve | null] | null>(null);
+  const onLoad = (e: SyntheticEvent<HTMLImageElement>) => {
+    onRatio(e);
+    if (SLEEVED.has(c.kind)) setSleeves(sleevesOf(e.currentTarget));
+  };
   const b = place(c.kind, ratio);
   if (b === null) return null;
+  if (SLEEVED.has(c.kind) && ratio !== null) {
+    // 左の袖・身ごろ (アウターで前を開けるなら左右 2 つ)・右の袖に切り分ける。写真は曲げない (#37 #38)
+    const box = { top: b.top, left: b.left, width: b.width, height: b.width * STAGE_RATIO * ratio };
+    const ps = pieces(box, sleeves?.[0] ?? null, sleeves?.[1] ?? null, open && c.kind === "outer");
+    const main = 1; // 身ごろ (左) の片に名前と testid を付ける (読み上げは 1 回だけ)
+    return (
+      <>
+        {ps.map((p, i) => (
+          <span
+            key={i}
+            className="wear-piece"
+            data-testid="piece"
+            data-kind={c.kind}
+            data-turn={p.turn}
+            style={{
+              ...boxStyle(p.box),
+              zIndex: SLOTS[c.kind]?.z,
+              transform: p.turn === 0 ? undefined : `rotate(${p.turn}deg)`,
+              transformOrigin: `${p.origin.x}% ${p.origin.y}%`,
+            }}
+          >
+            <Photo
+              className={`wear wear-${c.kind}`}
+              data-testid={i === main ? "worn" : undefined}
+              data-kind={i === main ? c.kind : undefined}
+              src={api.photoUrl(c.id)}
+              alt={i === main ? c.label || "服" : ""}
+              aria-hidden={i === main ? undefined : true}
+              draggable={false}
+              onLoad={i === main ? onLoad : undefined}
+              style={{
+                top: 0,
+                left: `${(-p.from / (p.to - p.from)) * 100}%`,
+                width: `${100 / (p.to - p.from)}%`,
+                height: "100%",
+              }}
+            />
+          </span>
+        ))}
+      </>
+    );
+  }
   return (
     <Photo
       className={`wear wear-${c.kind}`}
@@ -102,6 +177,8 @@ export const Stage = forwardRef<HTMLElement, StageProps>(function Stage(
   { worn, sparkle = 0, caption = "着ている服", pending = false },
   ref,
 ) {
+  // 中にトップスかワンピースを着ていれば、アウターの前を開ける (#38)。何もなければ閉じて下着を見せない
+  const inner = worn.some((c) => c.kind === "top" || c.kind === "dress");
   const names = worn.map((c) => c.label || "服").join("・");
   return (
     <figure
@@ -113,7 +190,9 @@ export const Stage = forwardRef<HTMLElement, StageProps>(function Stage(
     >
       <Body />
       {pending && <span className="wear-pending" data-testid="wear-pending" aria-hidden="true" />}
-      {worn.map((c) => (c.kind === "shoes" ? <Shoes key={c.id} item={c} /> : <Worn key={c.id} item={c} />))}
+      {worn.map((c) =>
+        c.kind === "shoes" ? <Shoes key={c.id} item={c} /> : <Worn key={c.id} item={c} open={inner} />,
+      )}
       {sparkle > 0 && (
         <span key={sparkle} className="sparkle" data-testid="sparkle" aria-hidden="true">
           <i />

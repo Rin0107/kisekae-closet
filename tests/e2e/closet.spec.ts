@@ -147,7 +147,7 @@ test("AC-21-1: 2 回目に開くと、Open-Meteo が 3 秒遅れても 2 秒以�
   await expect(page.getByTestId("weather-old")).toHaveCount(0, { timeout: 5000 });
 });
 
-test("AC-7-5 AC-9-2 AC-22-3 AC-25-1 AC-25-2 AC-27-3 AC-28-1 AC-28-2 AC-29-2 AC-32-1 AC-33-1 AC-34-1 AC-34-3: 服をしまい、着せ替えて、今日のコーデに決めると、カレンダーに載る。先の日の分も決めておける", async ({
+test("AC-7-5 AC-9-2 AC-22-3 AC-25-1 AC-25-2 AC-27-3 AC-28-1 AC-28-2 AC-29-2 AC-32-1 AC-33-1 AC-34-1 AC-34-3 AC-37-1 AC-40-1 AC-40-2 AC-41-1: 服をしまい、着せ替えて、今日のコーデに決めると、カレンダーに載る。先の日の分も決めておける", async ({
   page,
   baseURL,
 }) => {
@@ -228,6 +228,14 @@ test("AC-7-5 AC-9-2 AC-22-3 AC-25-1 AC-25-2 AC-27-3 AC-28-1 AC-28-2 AC-29-2 AC-3
     return (i.getBoundingClientRect().bottom - s.top) / s.height;
   });
   expect(hem).toBeGreaterThan(0.85);
+  // AC-37-1: トップスは袖・身ごろ・袖に切り分けられ、写真を測って、袖の先が腕の外の線に来るように左右対称に回る
+  // (見本の半袖は袖が横に張り出しているので、少し内へ回る。真っすぐ垂れた長袖なら外へ回る: 単体テスト)
+  const top = stage.locator('[data-testid="piece"][data-kind="top"]');
+  await expect(top).toHaveCount(3);
+  await expect.poll(() => top.first().getAttribute("data-turn").then(Number)).not.toBe(0);
+  const turns = await top.evaluateAll((els) => els.map((e) => Number(e.getAttribute("data-turn"))));
+  expect(turns[1]).toBe(0); // 身ごろは回さない
+  expect(turns[2]).toBeCloseTo(-(turns[0] ?? 0), 1);
 
   await page.getByRole("button", { name: "これに決めた" }).click();
   await expect(page.getByTestId("stamp")).toBeVisible();
@@ -243,12 +251,35 @@ test("AC-7-5 AC-9-2 AC-22-3 AC-25-1 AC-25-2 AC-27-3 AC-28-1 AC-28-2 AC-29-2 AC-3
     ).toBe(1);
   // AC-34-3: 幅 360px では今と同じ 200×400
   expect(await stage.boundingBox()).toMatchObject({ width: 200, height: 400 });
+  // AC-40-2: 幅 360px では棚は台の下
+  const rackTop = await page.getByTestId("rack").boundingBox();
+  const narrow = await stage.boundingBox();
+  expect(rackTop?.y ?? 0).toBeGreaterThanOrEqual((narrow?.y ?? 0) + (narrow?.height ?? 0));
+  // AC-41-1: 服をしまう画面の見出し『写真を撮る・選ぶ』は 1 行
+  await page.getByRole("navigation", { name: "画面" }).getByRole("button", { name: "クローゼット" }).click();
+  await page.getByRole("group", { name: "種類" }).getByRole("button", { name: "トップス" }).click();
+  const title = page.locator(".file-title");
+  await expect(title).toHaveText("写真を撮る・選ぶ");
+  expect(
+    await title.evaluate((e) => new Set([...e.getClientRects()].map((r) => Math.round(r.top))).size),
+  ).toBe(1);
+  await page.getByRole("navigation", { name: "画面" }).getByRole("button", { name: "今日" }).click();
   // AC-34-1: デスクトップ幅 (1280px) では台が大きい
   await page.setViewportSize({ width: 1280, height: 900 });
+  await page.evaluate(() => window.scrollTo(0, 0));
   const wide = await stage.boundingBox();
   expect(wide?.width).toBeGreaterThan(200);
   expect(wide?.height).toBeGreaterThan(400);
   await stage.screenshot({ path: "test-results/avatar-wide.png" });
+  // AC-40-1: スクロールせずに、台・棚のタブ・服のカードが見え、下のタブバーに隠れない
+  const bar = await page.getByRole("navigation", { name: "画面" }).boundingBox();
+  const card = await page.getByTestId("garment").first().boundingBox();
+  const tabs = await page.getByRole("tablist", { name: "服の種類" }).boundingBox();
+  expect(card).not.toBeNull();
+  expect((card?.y ?? 0) + (card?.height ?? 0)).toBeLessThanOrEqual(bar?.y ?? 0);
+  expect((tabs?.y ?? 0) + (tabs?.height ?? 0)).toBeLessThanOrEqual(bar?.y ?? 0);
+  expect((wide?.y ?? 0) + (wide?.height ?? 0)).toBeLessThanOrEqual(bar?.y ?? 0);
+  await page.screenshot({ path: "test-results/today-wide.png" });
   await page.setViewportSize({ width: 390, height: 844 });
 
   expect(await violations()).toEqual([]); // AC-25-2: 服をしまう・今日・着せ替えの画面 (読み直すと数え直しになる)
