@@ -98,6 +98,33 @@ async function stash(page: Page, kind: string, label: string, warmth: number, pn
   await expect(page.getByTestId("shelf")).toContainText(label);
 }
 
+test("AC-21-1: 2 回目に開くと、Open-Meteo が 3 秒遅れても 2 秒以内に天気が出る", async ({
+  page,
+  baseURL,
+}) => {
+  test.skip(baseURL?.startsWith("https://") === true, "本番・プレビューにはアカウントを作らない");
+  await authenticator(page);
+  const now = new Date();
+  await page.route("https://api.open-meteo.com/**", (r) => r.fulfill({ json: forecast(now) }));
+  await page.goto("./");
+  await page.getByRole("button", { name: "はじめる" }).click();
+  await page.getByRole("navigation", { name: "画面" }).getByRole("button", { name: "今日" }).click();
+  await expect(page.getByTestId("weather")).toHaveText("14℃ / 8℃・湿度 70%・雨 0mm");
+
+  await page.unroute("https://api.open-meteo.com/**");
+  await page.route("https://api.open-meteo.com/**", async (r) => {
+    await new Promise((ok) => setTimeout(ok, 3000));
+    await r.fulfill({ json: forecast(now) }).catch(() => {});
+  });
+  const start = Date.now();
+  await page.reload();
+  await expect(page.getByTestId("weather")).toHaveText("14℃ / 8℃・湿度 70%・雨 0mm", { timeout: 2000 });
+  expect(Date.now() - start).toBeLessThan(2000);
+  await expect(page.getByTestId("weather-old")).toContainText("の予報");
+  // 遅れて届いた新しい予報に置きかわる
+  await expect(page.getByTestId("weather-old")).toHaveCount(0, { timeout: 5000 });
+});
+
 test("AC-7-5 AC-9-2: 服をしまい、着せ替えて、今日のコーデに決めると、カレンダーに載る。先の日の分も決めておける", async ({
   page,
   baseURL,

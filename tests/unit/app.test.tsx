@@ -336,6 +336,8 @@ describe("ログインのあと: 今日の画面", () => {
       () => new Response(JSON.stringify({ daily: {} })),
     ]) {
       document.body.replaceChildren();
+      // 前回の予報がなければ (初めて開いたとき)、読めなかったと出す
+      localStorage.clear();
       vi.mocked(fetch).mockImplementation(async (url, init) =>
         String(url).startsWith("https://api.open-meteo.com/") ? res() : api(url, init),
       );
@@ -497,6 +499,149 @@ describe("服をしまう", () => {
     routes["clothes/t1"] = () => [404, { error: "見つからない" }];
     await click(el.querySelector('[data-testid="shelf"] li button'));
     expect(el.querySelector('[role="alert"]')?.textContent).toBe("見つからない");
+  });
+});
+
+describe("天気を 2 秒以内に出す (#21)", () => {
+  const SAVED = {
+    city: "tokyo",
+    at: new Date(2026, 10, 17, 7, 5).getTime(),
+    days: [
+      ["2026-11-16", { tempMax: 9, tempMin: 1, humidity: 40, precip: 0 }],
+      [DAY, { tempMax: 18, tempMin: 10, humidity: 55, precip: 1 }],
+    ],
+  };
+  // Open-Meteo の答えを待たせる (release で返す。fail なら読めない)
+  let release: (ok: boolean) => void;
+  beforeEach(() => {
+    localStorage.setItem("kisekae-closet:forecast", JSON.stringify(SAVED));
+    const api = vi.mocked(fetch).getMockImplementation() as typeof fetch;
+    vi.mocked(fetch).mockImplementation(async (url, init) => {
+      if (!String(url).startsWith("https://api.open-meteo.com/")) return api(url, init);
+      const ok = await new Promise<boolean>((r) => (release = r));
+      return ok ? new Response(JSON.stringify(WEATHER)) : new Response("oops", { status: 503 });
+    });
+  });
+
+  test("AC-21-1: 2 回目からは、Open-Meteo の答えを待たずに前回の予報 (今日の分) が出て、決められる", async () => {
+    const el = await render();
+    expect(el.querySelector('[data-testid="weather"]')?.textContent).toBe("18℃ / 10℃・湿度 55%・雨 1mm");
+    expect(el.textContent).not.toContain("天気を読んでいます…");
+    expect(button(el, "これに決めた")).toBeDefined();
+  });
+
+  test("AC-21-1: 前回の予報が別の市・今日の分がない・壊れているなら、使わずに読み込み中と出す", async () => {
+    for (const saved of [
+      { ...SAVED, city: "osaka" },
+      { ...SAVED, days: SAVED.days.slice(0, 1) },
+      { ...SAVED, at: "きのう" },
+    ]) {
+      document.body.replaceChildren();
+      localStorage.setItem("kisekae-closet:forecast", JSON.stringify(saved));
+      const el = await render();
+      expect(el.querySelector('[data-testid="weather"]')).toBeNull();
+      expect(el.textContent).toContain("天気を読んでいます…");
+    }
+  });
+
+  test("AC-21-2: 天気の読み込みは、ログインの確かめ (/api/me) の答えを待たずに始まる", async () => {
+    let signIn = () => {};
+    const inner = vi.mocked(fetch).getMockImplementation() as typeof fetch;
+    vi.mocked(fetch).mockImplementation(async (url, init) => {
+      if (String(url) === "/api/me") await new Promise<void>((r) => (signIn = r));
+      return inner(url, init);
+    });
+    const el = await render();
+    expect(el.querySelector("main")?.getAttribute("aria-busy")).toBe("true");
+    const urls = vi.mocked(fetch).mock.calls.map(([u]) => String(u));
+    expect(urls.some((u) => u.startsWith("https://api.open-meteo.com/"))).toBe(true);
+    await act(async () => signIn());
+    await act(async () => {});
+    // 先に始めた読み込みを使い回す (2 回読まない)
+    expect(
+      vi.mocked(fetch).mock.calls.filter(([u]) => String(u).startsWith("https://api.open-meteo.com/")),
+    ).toHaveLength(1);
+    expect(el.querySelector('[data-testid="weather"]')).not.toBeNull();
+  });
+
+  test("AC-21-2: 使ったことのない端末では、ログインの確かめが済むまで外へ通信しない。ログアウト・未ログインで前回の予報を消す", async () => {
+    localStorage.clear();
+    let wait = true;
+    let signIn = () => {};
+    const inner = vi.mocked(fetch).getMockImplementation() as typeof fetch;
+    vi.mocked(fetch).mockImplementation(async (url, init) => {
+      if (String(url) === "/api/me" && wait) await new Promise<void>((r) => (signIn = r));
+      return inner(url, init);
+    });
+    const el = await render();
+    const meteo = () =>
+      vi.mocked(fetch).mock.calls.filter(([u]) => String(u).startsWith("https://api.open-meteo.com/"));
+    expect(meteo()).toHaveLength(0);
+    await act(async () => signIn());
+    await act(async () => {});
+    expect(meteo()).toHaveLength(1);
+    await act(async () => release(true));
+    await act(async () => {});
+    expect(localStorage.getItem("kisekae-closet:forecast")).not.toBeNull();
+    await click(el.querySelector('nav[aria-label="画面"] button:nth-child(2)'));
+    await click(button(el, "ログアウト"));
+    expect(button(el, "はじめる")).toBeDefined();
+    expect(localStorage.getItem("kisekae-closet:forecast")).toBeNull();
+
+    // ログインしていない (セッション切れ) と分かったら消す
+    wait = false;
+    document.body.replaceChildren();
+    localStorage.setItem("kisekae-closet:forecast", JSON.stringify(SAVED));
+    routes.me = () => [401, { error: "ログインしていない" }];
+    await render();
+    expect(localStorage.getItem("kisekae-closet:forecast")).toBeNull();
+  });
+
+  test("AC-21-3: 前回の予報には読んだ時刻の一言が付き、新しい答えが来たら置きかわる。読めなければ前回のまま、そう添える", async () => {
+    const el = await render();
+    expect(el.querySelector('[data-testid="weather-old"]')?.textContent).toBe(
+      "7:05の予報 (新しい予報を読んでいます)",
+    );
+    await act(async () => release(true));
+    await act(async () => {});
+    expect(el.querySelector('[data-testid="weather"]')?.textContent).toBe("30℃ / 24℃・湿度 60%・雨 0mm");
+    expect(el.querySelector('[data-testid="weather-old"]')).toBeNull();
+
+    document.body.replaceChildren();
+    localStorage.setItem("kisekae-closet:forecast", JSON.stringify(SAVED));
+    const e = await render();
+    await act(async () => release(false));
+    await act(async () => {});
+    expect(e.querySelector('[data-testid="weather"]')?.textContent).toBe("18℃ / 10℃・湿度 55%・雨 1mm");
+    expect(e.querySelector('[data-testid="weather-old"]')?.textContent).toBe(
+      "7:05の予報 (新しい予報を読めませんでした)",
+    );
+    expect(e.querySelector('[data-testid="weather-failed"]')).toBeNull();
+  });
+
+  test("AC-21-3: 市を変えると、その市の前回の予報があればすぐ出す", async () => {
+    localStorage.setItem("kisekae-closet:forecast", JSON.stringify({ ...SAVED, city: "osaka" }));
+    const el = await render();
+    expect(el.textContent).toContain("天気を読んでいます…");
+    await change(el.querySelector('select[aria-label="市"]'), "osaka");
+    expect(el.querySelector('[data-testid="weather"]')?.textContent).toBe("18℃ / 10℃・湿度 55%・雨 1mm");
+  });
+
+  test("AC-21-4: 端末に置く予報は市の ID・時刻・日ごとの数字だけ。DATA.md にキーが書いてある", async () => {
+    localStorage.clear();
+    const el = await render();
+    await act(async () => release(true));
+    await act(async () => {});
+    expect(el.querySelector('[data-testid="weather"]')).not.toBeNull();
+    const saved = JSON.parse(localStorage.getItem("kisekae-closet:forecast") ?? "null") as Record<
+      string,
+      unknown
+    >;
+    expect(Object.keys(saved).sort()).toEqual(["at", "city", "days"]);
+    expect(saved.city).toBe("tokyo");
+    expect(saved.days).toEqual([[DAY, { tempMax: 30, tempMin: 24, humidity: 60, precip: 0 }]]);
+    const data = readFileSync("DATA.md", "utf8");
+    expect(data).toContain("`kisekae-closet:forecast`");
   });
 });
 

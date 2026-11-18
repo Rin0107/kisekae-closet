@@ -23,6 +23,15 @@ export function save<T>(key: string, value: T): void {
   }
 }
 
+/** 1 つだけ消す。 */
+export function forget(key: string): void {
+  try {
+    localStorage.removeItem(PREFIX + key);
+  } catch {
+    // 消せなくても動き続ける
+  }
+}
+
 /** このアプリが保存したものを全部消す (「データを消す」ボタン用)。 */
 export function clearAll(): void {
   for (const k of Object.keys(localStorage)) {

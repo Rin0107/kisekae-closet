@@ -115,3 +115,43 @@ export function canPlan(today: string, day: string): boolean {
   const n = daysAhead(today, day);
   return n >= 0 && n < FORECAST_DAYS;
 }
+
+/** 予報の読み込みを諦めるまで (ミリ秒)。それまでは前回の予報を出しておく。 */
+export const FORECAST_TIMEOUT_MS = 10_000;
+
+/** 市の予報を Open-Meteo から読む。読めなければ "failed"。 */
+export function fetchForecast(cityId: string): Promise<Map<string, Weather> | "failed"> {
+  const signal =
+    typeof AbortSignal.timeout === "function" ? AbortSignal.timeout(FORECAST_TIMEOUT_MS) : undefined;
+  return fetch(weatherUrl(cityById(cityId)), signal ? { signal } : undefined)
+    .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+    .then((b: unknown) => {
+      const days = parseForecast(b);
+      return days.size === 0 ? ("failed" as const) : days;
+    })
+    .catch(() => "failed" as const);
+}
+
+const W = z.object({ tempMax: Num, tempMin: Num, humidity: Num, precip: Num });
+/** 端末に置く前回の予報 (DATA.md)。市の ID・読んだ時刻・日ごとの数字だけ。 */
+export const SavedForecast = z.object({
+  city: z.string().max(20),
+  at: z.number().int().nonnegative(),
+  days: z.array(z.tuple([Day, W])).max(FORECAST_DAYS * 2),
+});
+export type SavedForecast = z.infer<typeof SavedForecast>;
+
+export function toSaved(city: string, days: ReadonlyMap<string, Weather>, at: number): SavedForecast {
+  return { city, at, days: [...days] };
+}
+
+/** 前回の予報から、その市の今日より先 (今日を含む) の日だけを取り出す。なければ null。 */
+export function fromSaved(
+  saved: SavedForecast | null,
+  city: string,
+  today: string,
+): { days: Map<string, Weather>; at: number } | null {
+  if (saved === null || saved.city !== city) return null;
+  const days = new Map(saved.days.filter(([d]) => d >= today));
+  return days.has(today) ? { days, at: saved.at } : null;
+}

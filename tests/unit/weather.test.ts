@@ -1,13 +1,17 @@
 import fc from "fast-check";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import {
   canPlan,
   CITIES,
   cityById,
   daysAhead,
   FORECAST_DAYS,
+  fetchForecast,
+  fromSaved,
   parseForecast,
   parseWeather,
+  SavedForecast,
+  toSaved,
   weatherUrl,
 } from "../../src/weather";
 import { runs } from "./fc";
@@ -125,4 +129,45 @@ test("fuzz: どんな JSON でも予報の読み取りは落ちず、値は全�
     }),
     runs(),
   );
+});
+
+test("前回の予報: 同じ市の今日から先だけを取り出す。別の市・今日の分がなければ null", () => {
+  const w = { tempMax: 10, tempMin: 2, humidity: 50, precip: 0 };
+  const days = new Map([
+    ["2026-11-16", w],
+    ["2026-11-17", w],
+    ["2026-11-18", { ...w, tempMax: 12 }],
+  ]);
+  const saved = toSaved("tokyo", days, 1000);
+  expect(SavedForecast.parse(saved)).toEqual(saved);
+  const got = fromSaved(saved, "tokyo", "2026-11-17");
+  expect(got?.at).toBe(1000);
+  expect([...(got?.days.keys() ?? [])]).toEqual(["2026-11-17", "2026-11-18"]);
+  expect(fromSaved(saved, "osaka", "2026-11-17")).toBeNull();
+  expect(fromSaved(saved, "tokyo", "2026-11-19")).toBeNull();
+  expect(fromSaved(null, "tokyo", "2026-11-17")).toBeNull();
+});
+
+test("fetchForecast: 読めれば日ごとの予報、200 でない・形が違う・通信が落ちたら failed", async () => {
+  const ok = {
+    daily: {
+      time: ["2026-11-17"],
+      temperature_2m_max: [10],
+      temperature_2m_min: [2],
+      relative_humidity_2m_mean: [50],
+      precipitation_sum: [0],
+    },
+  };
+  for (const [res, want] of [
+    [() => Promise.resolve(new Response(JSON.stringify(ok))), 1],
+    [() => Promise.resolve(new Response("x", { status: 500 })), "failed"],
+    [() => Promise.resolve(new Response(JSON.stringify({ daily: {} }))), "failed"],
+    [() => Promise.reject(new Error("offline")), "failed"],
+  ] as const) {
+    vi.stubGlobal("fetch", vi.fn(res));
+    const got = await fetchForecast("tokyo");
+    expect(got === "failed" ? got : got.size).toBe(want);
+    expect(String(vi.mocked(fetch).mock.calls[0]?.[0])).toBe(weatherUrl(cityById("tokyo")));
+  }
+  vi.unstubAllGlobals();
 });

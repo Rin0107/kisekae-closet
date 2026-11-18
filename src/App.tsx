@@ -19,9 +19,9 @@ import { BAND_NAMES, dressIn, gauge, wear } from "./outfit";
 import { login, register } from "./passkey";
 import { recommend } from "./recommend";
 import { shrinkPhoto } from "./shrink";
-import { load, save } from "./storage";
+import { forget, load, save } from "./storage";
 import { applyTheme, DEFAULT_THEME, ThemeId, themeById, THEMES } from "./theme";
-import { canPlan, CITIES, cityById, parseForecast, weatherUrl, type Weather } from "./weather";
+import { canPlan, CITIES, fetchForecast, fromSaved, SavedForecast, toSaved, type Weather } from "./weather";
 
 export const KIND_NAMES: Record<string, string> = {
   top: "トップス",
@@ -56,17 +56,47 @@ function message(e: unknown): string {
 
 const nameOf = (c: Clothing) => c.label || (KIND_NAMES[c.kind] ?? "服");
 
+const City = z.string();
+
+/** 開いた瞬間に始めた予報の読み込み (ログインの確かめを待たない、#21)。 */
+interface FirstForecast {
+  city: string;
+  at: number;
+  promise: Promise<Map<string, Weather> | "failed">;
+}
+/** 最初の読み込みを使い回してよい間 (これより後に同じ市を選び直したら読み直す)。 */
+const FIRST_FRESH_MS = 60_000;
+
+function cachedWx(city: string): Wx | null {
+  const c = fromSaved(load<SavedForecast | null>("forecast", SavedForecast.nullable(), null), city, today());
+  return c === null ? null : { city, days: c.days, at: c.at, fresh: false, failed: false };
+}
+
+/** 予報の状態。fresh: 今読んだもの。false なら端末に置いた前回の予報 (at に読んだ時刻)。 */
+type Wx =
+  | { city: string; days: Map<string, Weather>; at: number; fresh: boolean; failed: boolean }
+  | { city: string; days: "failed" };
+
 export function App() {
   const [state, setState] = useState<"loading" | "out" | "in">("loading");
+  // この端末でログインして使ったことがあれば (前回の予報がある)、天気はログインの確かめと同時に読み始める。
+  // 使ったことのない端末では、ログインの前に外へ通信しない (確かめのあと Home が読む)
+  const [first] = useState<FirstForecast | null>(() => {
+    if (load<SavedForecast | null>("forecast", SavedForecast.nullable(), null) === null) return null;
+    const city = load("city", City, "tokyo");
+    return { city, at: Date.now(), promise: fetchForecast(city) };
+  });
+  const out = useCallback(() => {
+    // ログインしていない端末に予報を残さない (次に開いたとき、ログインの前に読みに行かないように)
+    forget("forecast");
+    setState("out");
+  }, []);
   useEffect(() => applyTheme(themeById(load("theme", ThemeId, DEFAULT_THEME))), []);
   useEffect(() => {
-    api.me().then(
-      () => setState("in"),
-      () => setState("out"),
-    );
-  }, []);
+    api.me().then(() => setState("in"), out);
+  }, [out]);
   if (state === "loading") return <main aria-busy="true" />;
-  return state === "in" ? <Home onOut={() => setState("out")} /> : <Welcome onIn={() => setState("in")} />;
+  return state === "in" ? <Home first={first} onOut={out} /> : <Welcome onIn={() => setState("in")} />;
 }
 
 function Welcome({ onIn }: { onIn: () => void }) {
@@ -101,7 +131,6 @@ function Welcome({ onIn }: { onIn: () => void }) {
   );
 }
 
-const City = z.string();
 const NO_FORECAST: ReadonlyMap<string, Weather> = new Map();
 type Tab = "today" | "closet" | "calendar";
 const TABS: { id: Tab; name: string }[] = [
@@ -110,12 +139,12 @@ const TABS: { id: Tab; name: string }[] = [
   { id: "calendar", name: "カレンダー" },
 ];
 
-function Home({ onOut }: { onOut: () => void }) {
+function Home({ first, onOut }: { first: FirstForecast | null; onOut: () => void }) {
   const [clothes, setClothes] = useState<Clothing[]>([]);
   const [outfits, setOutfits] = useState<Outfit[]>([]);
   const [city, setCity] = useState(() => load("city", City, "tokyo"));
-  // どの市の予報か (日付 → 天気、今日を含めて 16 日) と、読めなかったか。市が変われば読み込み中
-  const [wx, setWx] = useState<{ city: string; days: Map<string, Weather> | "failed" } | null>(null);
+  // 前回の予報があれば、読み終わるのを待たずにまずそれを出す (#21)
+  const [wx, setWx] = useState<Wx | null>(() => cachedWx(city));
   const [tab, setTab] = useState<Tab>("today");
   // 着せ替えている日 (今日か、先に決めておく日)
   const [plan, setPlan] = useState(() => today());
@@ -139,20 +168,28 @@ function Home({ onOut }: { onOut: () => void }) {
     save("city", city);
     // 前の市の答えが後から届いても使わない
     let stale = false;
-    const set = (days: Map<string, Weather> | "failed") => {
-      if (!stale) setWx({ city, days });
-    };
-    fetch(weatherUrl(cityById(city)))
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-      .then((b: unknown) => {
-        const days = parseForecast(b);
-        set(days.size === 0 ? "failed" : days);
-      })
-      .catch(() => set("failed"));
+    const p =
+      first !== null && first.city === city && Date.now() - first.at < FIRST_FRESH_MS
+        ? first.promise
+        : fetchForecast(city);
+    void p.then((days) => {
+      if (stale) return;
+      if (days === "failed") {
+        // 前回の予報があれば、それを出したまま一言だけ添える
+        setWx((w) =>
+          w !== null && w.city === city && w.days !== "failed" ? { ...w, failed: true } : { city, days },
+        );
+        return;
+      }
+      const at = Date.now();
+      save("forecast", toSaved(city, days, at));
+      setWx({ city, days, at, fresh: true, failed: false });
+    });
     return () => {
       stale = true;
     };
-  }, [city]);
+  }, [city, first]);
+  const old = wx !== null && wx.city === city && wx.days !== "failed" && !wx.fresh ? wx : null;
   const wxState = wx === null || wx.city !== city ? "loading" : wx.days === "failed" ? "failed" : "ok";
   const forecast = wx !== null && wx.city === city && wx.days !== "failed" ? wx.days : NO_FORECAST;
 
@@ -220,6 +257,12 @@ function Home({ onOut }: { onOut: () => void }) {
                   <span data-testid="weather">
                     {weather.tempMax}℃ / {weather.tempMin}℃・湿度 {weather.humidity}%・雨 {weather.precip}mm
                   </span>
+                  {old && (
+                    <span className="muted wx-old" data-testid="weather-old">
+                      {hm(old.at)}の予報
+                      {old.failed ? " (新しい予報を読めませんでした)" : " (新しい予報を読んでいます)"}
+                    </span>
+                  )}
                 </p>
               ) : wxState === "failed" ? (
                 <p className="weather" role="alert" data-testid="weather-failed">
@@ -230,7 +273,15 @@ function Home({ onOut }: { onOut: () => void }) {
                   {wxState === "loading" ? "天気を読んでいます…" : "この日の予報がありません"}
                 </p>
               )}
-              <select className="city" value={city} onChange={(e) => setCity(e.target.value)} aria-label="市">
+              <select
+                className="city"
+                value={city}
+                onChange={(e) => {
+                  setCity(e.target.value);
+                  setWx(cachedWx(e.target.value));
+                }}
+                aria-label="市"
+              >
                 {CITIES.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.name}
@@ -855,4 +906,10 @@ function CalendarRoom({
       )}
     </section>
   );
+}
+
+/** 読んだ時刻 (例: 7:05)。 */
+function hm(at: number): string {
+  const d = new Date(at);
+  return `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`;
 }

@@ -138,6 +138,7 @@ input {
   gap: var(--sp-2);
 }
 .weather {
+  flex-wrap: wrap;
   display: flex;
   align-items: center;
   gap: var(--sp-2);
@@ -640,4 +641,10 @@ input {
   height: 20px;
   border-radius: 50%;
   border: 1px solid var(--c-line);
+}
+/* 前回の予報を出しているときの一言 (#21) */
+.wx-old {
+  flex-basis: 100%;
+  font-size: 0.8125rem;
+  font-weight: 400;
 }
