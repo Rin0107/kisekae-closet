@@ -21,7 +21,15 @@ import { recommend } from "./recommend";
 import { shrinkPhoto } from "./shrink";
 import { clearAll, forget, load, save } from "./storage";
 import { applyTheme, DEFAULT_THEME, ThemeId, themeById, THEMES } from "./theme";
-import { canPlan, CITIES, fetchForecast, fromSaved, SavedForecast, toSaved, type Weather } from "./weather";
+import {
+  canPlan,
+  CITIES,
+  fetchForecastRetrying,
+  fromSaved,
+  SavedForecast,
+  toSaved,
+  type Weather,
+} from "./weather";
 
 export const KIND_NAMES: Record<string, string> = {
   top: "トップス",
@@ -32,9 +40,10 @@ export const KIND_NAMES: Record<string, string> = {
   accessory: "こもの",
 };
 
-/** クローゼットのタブ。ワンピースはトップスの棚に並べる。 */
+/** クローゼットのタブ。種類ごとに 1 つ (ワンピースにも自分のタブ、#35)。 */
 export const SHELVES: { id: string; name: string; kinds: string[] }[] = [
-  { id: "top", name: "トップス", kinds: ["top", "dress"] },
+  { id: "top", name: "トップス", kinds: ["top"] },
+  { id: "dress", name: "ワンピース", kinds: ["dress"] },
   { id: "bottom", name: "ボトムス", kinds: ["bottom"] },
   { id: "outer", name: "アウター", kinds: ["outer"] },
   { id: "shoes", name: "くつ", kinds: ["shoes"] },
@@ -84,7 +93,7 @@ export function App() {
   const [first] = useState<FirstForecast | null>(() => {
     if (load<SavedForecast | null>("forecast", SavedForecast.nullable(), null) === null) return null;
     const city = load("city", City, "tokyo");
-    return { city, at: Date.now(), promise: fetchForecast(city) };
+    return { city, at: Date.now(), promise: fetchForecastRetrying(city) };
   });
   const out = useCallback(() => {
     // ログインしていない端末に予報を残さない (次に開いたとき、ログインの前に読みに行かないように)
@@ -148,6 +157,8 @@ function Home({ first, onOut }: { first: FirstForecast | null; onOut: () => void
   // 前回の予報があれば、読み終わるのを待たずにまずそれを出す (#21)
   const [wx, setWx] = useState<Wx | null>(() => cachedWx(city));
   const [tab, setTab] = useState<Tab>("today");
+  // 「もう一度読む」を押した回数 (#31)。増えるたびに予報を読み直す
+  const [again, setAgain] = useState(0);
   // 着せ替えている日 (今日か、先に決めておく日)
   const [plan, setPlan] = useState(() => today());
   // null: まだ触っていない (決めたコーデか、おすすめを着る)
@@ -178,9 +189,9 @@ function Home({ first, onOut }: { first: FirstForecast | null; onOut: () => void
     // 前の市の答えが後から届いても使わない
     let stale = false;
     const p =
-      first !== null && first.city === city && Date.now() - first.at < FIRST_FRESH_MS
+      again === 0 && first !== null && first.city === city && Date.now() - first.at < FIRST_FRESH_MS
         ? first.promise
-        : fetchForecast(city);
+        : fetchForecastRetrying(city);
     void p.then((days) => {
       if (stale) return;
       if (days === "failed") {
@@ -197,7 +208,17 @@ function Home({ first, onOut }: { first: FirstForecast | null; onOut: () => void
     return () => {
       stale = true;
     };
-  }, [city, first]);
+  }, [city, first, again]);
+  const readAgain = () => {
+    // 読み直している間は「読んでいます」に戻す (前回の予報があれば、それを出したまま)
+    setWx((w) => (w !== null && w.city === city && w.days !== "failed" ? { ...w, failed: false } : null));
+    setAgain((n) => n + 1);
+  };
+  const againButton = (
+    <button type="button" className="ghost small" data-testid="weather-again" onClick={readAgain}>
+      もう一度読む
+    </button>
+  );
   const old = wx !== null && wx.city === city && wx.days !== "failed" && !wx.fresh ? wx : null;
   const wxState = wx === null || wx.city !== city ? "loading" : wx.days === "failed" ? "failed" : "ok";
   const forecast = wx !== null && wx.city === city && wx.days !== "failed" ? wx.days : NO_FORECAST;
@@ -276,10 +297,12 @@ function Home({ first, onOut }: { first: FirstForecast | null; onOut: () => void
                       {old.failed ? " (新しい予報を読めませんでした)" : " (新しい予報を読んでいます)"}
                     </span>
                   )}
+                  {old?.failed && againButton}
                 </p>
               ) : wxState === "failed" ? (
                 <p className="weather" role="alert" data-testid="weather-failed">
-                  天気を読めませんでした。市を選び直すか、あとで開き直してください
+                  天気を読めませんでした。
+                  {againButton}
                 </p>
               ) : (
                 <p className="weather muted">

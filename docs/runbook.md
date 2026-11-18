@@ -15,7 +15,7 @@
 | 写真が大きい・Exif が残る | 理由を出す (400) | `src/worker/photo.ts` の理由の文 |
 | 上限 (服 500・コーデ 5000) | 「服は 500 着まで」など (400) | `LIMITS` (db.ts) |
 | Worker の中の失敗 | 「失敗した」(500)。ログは固定の文だけ | Cloudflare のダッシュボードの数 (中身は残らない) |
-| 天気が読めない | 天気とおすすめが出ない (クローゼットは使える) | Open-Meteo の答え (`src/weather.ts` の parseWeather) |
+| 天気が読めない | 自動で 2 回読み直し、だめなら「もう一度読む」を出す。前回の予報があればそれで決められる (クローゼットは使える) | Open-Meteo の答え (`src/weather.ts` の parseWeather) |
 
 ## 戻し方
 - 壊れた版を出したとき: 直す PR を出して `wk merge` → `wk deploy`。前の版に戻すなら revert の PR

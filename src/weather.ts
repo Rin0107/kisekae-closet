@@ -2,6 +2,7 @@
 // 場所は「市」を選ぶだけ (代表の緯度・経度。端末の localStorage に置く)。
 // 予報は今日を含めて 16 日分 (Open-Meteo の forecast_days の上限)。先の日のコーデを決めておくのに使う。
 import { z } from "zod";
+import { sleep } from "./sleep";
 
 /** 予報のある日数 (今日を含む)。 */
 export const FORECAST_DAYS = 16;
@@ -130,6 +131,26 @@ export function fetchForecast(cityId: string): Promise<Map<string, Weather> | "f
       return days.size === 0 ? ("failed" as const) : days;
     })
     .catch(() => "failed" as const);
+}
+
+/**
+ * 読めなかったときの、自動の読み直しの間 (ミリ秒、#31)。数がそのまま回数の上限 (1 回の読み込みで、最初の 1 回 + この数まで)。
+ * 無限に通信しない。それでも読めなければ、画面の「もう一度読む」で利用者が読み直す。
+ */
+export const RETRY_DELAYS_MS: readonly number[] = [1_000, 3_000];
+
+/** 市の予報を読む。読めなければ間をおいて RETRY_DELAYS_MS の数まで読み直す。それでも読めなければ "failed"。 */
+export async function fetchForecastRetrying(
+  cityId: string,
+  wait: (ms: number) => Promise<void> = sleep,
+): Promise<Map<string, Weather> | "failed"> {
+  let r = await fetchForecast(cityId);
+  for (const ms of RETRY_DELAYS_MS) {
+    if (r !== "failed") break;
+    await wait(ms);
+    r = await fetchForecast(cityId);
+  }
+  return r;
 }
 
 const W = z.object({ tempMax: Num, tempMin: Num, humidity: Num, precip: Num });

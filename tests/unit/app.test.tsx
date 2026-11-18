@@ -8,6 +8,9 @@ const pk = vi.hoisted(() => ({ register: vi.fn(), login: vi.fn() }));
 vi.mock("../../src/passkey", () => pk);
 const sh = vi.hoisted(() => ({ shrinkPhoto: vi.fn() }));
 vi.mock("../../src/shrink", () => sh);
+// 天気の読み直しの間 (#31) は待たない
+const sl = vi.hoisted(() => ({ sleep: vi.fn() }));
+vi.mock("../../src/sleep", () => sl);
 
 import { App, KIND_NAMES, shelfOf, today } from "../../src/App";
 
@@ -93,6 +96,10 @@ async function render(): Promise<HTMLElement> {
   return el;
 }
 
+/** 読み直しの続き (待たない sleep・fetch の答え) を流し切る。 */
+const settle = async () => {
+  for (let i = 0; i < 6; i++) await act(async () => {});
+};
 const click = async (el: Element | null | undefined) => {
   await act(async () => (el as HTMLElement).click());
   await act(async () => {});
@@ -189,7 +196,7 @@ describe("ログインのあと: 今日の画面", () => {
     expect(worn(el)).toEqual(["白T", "デニム", "スニーカー"]);
     const img = el.querySelector('[data-testid="worn"]') as HTMLImageElement;
     expect(img.getAttribute("src")).toBe("/api/clothes/t1/photo");
-    expect(img.style.top).toBe("14%");
+    expect(img.style.top).toBe("12.5%");
     expect(el.querySelector('[data-testid="labels"]')?.textContent).toBe("白Tデニムスニーカー");
   });
 
@@ -303,10 +310,13 @@ describe("ログインのあと: 今日の画面", () => {
 
   test("市を変えると端末に覚え、天気を読み直す。天気が読めなければ決めるボタンもない", async () => {
     const el = await render();
-    vi.mocked(fetch).mockImplementationOnce(async () => {
-      throw new Error("offline");
+    const api = vi.mocked(fetch).getMockImplementation() as typeof fetch;
+    vi.mocked(fetch).mockImplementation(async (url, init) => {
+      if (String(url).startsWith("https://api.open-meteo.com/")) throw new Error("offline");
+      return api(url, init);
     });
     await change(el.querySelector('select[aria-label="市"]'), "osaka");
+    await settle();
     expect(localStorage.getItem("kisekae-closet:city")).toBe('"osaka"');
     expect(el.querySelector('[data-testid="weather"]')).toBeNull();
     expect(el.querySelector('[role="alert"][data-testid="weather-failed"]')?.textContent).toContain(
@@ -342,6 +352,7 @@ describe("ログインのあと: 今日の画面", () => {
         String(url).startsWith("https://api.open-meteo.com/") ? res() : api(url, init),
       );
       const e = await render();
+      await settle();
       expect(e.querySelector('[data-testid="weather-failed"]')?.getAttribute("role")).toBe("alert");
       expect(button(e, "これに決めた")).toBeUndefined();
     }
@@ -358,10 +369,12 @@ describe("ログインのあと: 今日の画面", () => {
 });
 
 describe("クローゼットから着せる", () => {
-  test("AC-2-1: 種類ごとのタブで、その種類の服だけが並ぶ (ワンピースはトップスの棚)", async () => {
+  test("AC-2-1: 種類ごとのタブで、その種類の服だけが並ぶ", async () => {
     const el = await render();
     const names = () => [...el.querySelectorAll('[data-testid="garment"]')].map((b) => b.textContent);
-    expect(names()).toEqual(["白T", "ニット", "花柄"]);
+    expect(names()).toEqual(["白T", "ニット"]);
+    await click(tab(el, "ワンピース"));
+    expect(names()).toEqual(["花柄"]);
     await click(tab(el, "ボトムス"));
     expect(names()).toEqual(["デニム"]);
     await click(tab(el, "くつ"));
@@ -383,6 +396,7 @@ describe("クローゼットから着せる", () => {
     expect(worn(el)).toEqual(["スニーカー", "デニム", "ニット"]);
     expect(el.querySelector('[data-testid="sparkle"]')).not.toBeNull();
     expect(el.querySelector('[aria-label="ニットを着る"]')?.getAttribute("aria-pressed")).toBe("true");
+    await click(tab(el, "ワンピース"));
     await click(el.querySelector('[aria-label="花柄を着る"]'));
     expect(worn(el)).not.toContain("デニム");
     expect(worn(el)).toContain("花柄");
@@ -402,6 +416,7 @@ describe("クローゼットから着せる", () => {
     await click(knit); // ドラッグのあとの click では二度着ない
     expect(worn(el)).toContain("ニット");
     expect(el.querySelector('[data-testid="ghost"]')).toBeNull();
+    await click(tab(el, "ワンピース"));
     const flower = el.querySelector('[aria-label="花柄を着る"]') as HTMLElement;
     await pointer(flower, "pointerdown", 100, 600);
     await pointer(flower, "pointermove", 300, 500);
@@ -610,8 +625,11 @@ describe("天気を 2 秒以内に出す (#21)", () => {
     document.body.replaceChildren();
     localStorage.setItem("kisekae-closet:forecast", JSON.stringify(SAVED));
     const e = await render();
-    await act(async () => release(false));
-    await act(async () => {});
+    // 自動の読み直し (#31) も全部読めない
+    for (let i = 0; i < 3; i++) {
+      await act(async () => release(false));
+      await act(async () => {});
+    }
     expect(e.querySelector('[data-testid="weather"]')?.textContent).toBe("18℃ / 10℃・湿度 55%・雨 1mm");
     expect(e.querySelector('[data-testid="weather-old"]')?.textContent).toBe(
       "7:05の予報 (新しい予報を読めませんでした)",
@@ -981,8 +999,120 @@ describe("アカウント", () => {
     await click(button(el, "クローゼット"));
     expect(el.querySelector("a")?.getAttribute("href")).toBe("/api/export");
     expect(Object.keys(KIND_NAMES)).toEqual(["top", "bottom", "outer", "dress", "shoes", "accessory"]);
-    expect(shelfOf("dress")).toBe("top");
+    expect(shelfOf("dress")).toBe("dress");
     expect(shelfOf("hat")).toBe("top");
+  });
+});
+
+describe("天気の読み直し (#31)", () => {
+  const meteo = () =>
+    vi.mocked(fetch).mock.calls.filter(([u]) => String(u).startsWith("https://api.open-meteo.com/")).length;
+  /** Open-Meteo が、はじめの n 回だけ読めない。 */
+  const failFirst = (n: number) => {
+    let left = n;
+    const api = vi.mocked(fetch).getMockImplementation() as typeof fetch;
+    vi.mocked(fetch).mockImplementation(async (url, init) => {
+      if (String(url).startsWith("https://api.open-meteo.com/") && left-- > 0)
+        return new Response("oops", { status: 503 });
+      return api(url, init);
+    });
+  };
+
+  test("AC-31-1: 最初の読み込みが 1 回失敗しても、自動で読み直して天気・おすすめ・『これに決めた』が出る", async () => {
+    failFirst(1);
+    const el = await render();
+    await settle();
+    expect(sl.sleep).toHaveBeenCalledWith(1000);
+    expect(meteo()).toBe(2);
+    expect(el.querySelector('[data-testid="weather"]')?.textContent).toBe("30℃ / 24℃・湿度 60%・雨 0mm");
+    expect(el.querySelector('[data-testid="weather-failed"]')).toBeNull();
+    expect(el.querySelectorAll('[data-testid="stage"] [data-testid="worn"]').length).toBeGreaterThan(0);
+    expect(button(el, "これに決めた")).toBeDefined();
+  });
+
+  test("AC-31-1: 前回の予報がある端末で、開いた瞬間の読み込みが失敗しても読み直す", async () => {
+    localStorage.setItem(
+      "kisekae-closet:forecast",
+      JSON.stringify({
+        city: "tokyo",
+        at: NOW.getTime() - 3600_000,
+        days: [[DAY, { tempMax: 18, tempMin: 10, humidity: 55, precip: 1 }]],
+      }),
+    );
+    failFirst(2);
+    const el = await render();
+    await settle();
+    expect(meteo()).toBe(3);
+    expect(el.querySelector('[data-testid="weather"]')?.textContent).toBe("30℃ / 24℃・湿度 60%・雨 0mm");
+    expect(el.querySelector('[data-testid="weather-old"]')).toBeNull();
+  });
+
+  test("AC-31-2: 読み直しも失敗したら『もう一度読む』が出て、押すと読み直す", async () => {
+    failFirst(3);
+    const el = await render();
+    await settle();
+    expect(el.querySelector('[data-testid="weather-failed"]')?.textContent).toContain(
+      "天気を読めませんでした",
+    );
+    expect(button(el, "これに決めた")).toBeUndefined();
+    const again = button(el, "もう一度読む");
+    expect(again).toBeDefined();
+    await click(again);
+    await settle();
+    expect(meteo()).toBe(4);
+    expect(el.querySelector('[data-testid="weather"]')?.textContent).toBe("30℃ / 24℃・湿度 60%・雨 0mm");
+    expect(button(el, "もう一度読む")).toBeUndefined();
+    expect(button(el, "これに決めた")).toBeDefined();
+  });
+
+  test("AC-31-2: 前回の予報を出したまま読めなかったときも『もう一度読む』が出る", async () => {
+    localStorage.setItem(
+      "kisekae-closet:forecast",
+      JSON.stringify({
+        city: "tokyo",
+        at: NOW.getTime() - 3600_000,
+        days: [[DAY, { tempMax: 18, tempMin: 10, humidity: 55, precip: 1 }]],
+      }),
+    );
+    failFirst(3);
+    const el = await render();
+    await settle();
+    expect(el.querySelector('[data-testid="weather-old"]')?.textContent).toContain(
+      "新しい予報を読めませんでした",
+    );
+    await click(button(el, "もう一度読む"));
+    await settle();
+    expect(el.querySelector('[data-testid="weather-old"]')).toBeNull();
+    expect(el.querySelector('[data-testid="weather"]')?.textContent).toBe("30℃ / 24℃・湿度 60%・雨 0mm");
+  });
+
+  test("AC-31-3: 自動の読み直しには上限がある (読めなくても 3 回で止まり、待つ間は 1 秒・3 秒)", async () => {
+    failFirst(1_000);
+    const el = await render();
+    await settle();
+    await settle();
+    expect(meteo()).toBe(3);
+    expect(sl.sleep.mock.calls).toEqual([[1000], [3000]]);
+    // 押すたびに、また上限まで (押さなければ通信しない)
+    await click(button(el, "もう一度読む"));
+    await settle();
+    await settle();
+    expect(meteo()).toBe(6);
+  });
+});
+
+describe("ワンピースの居場所 (#35)", () => {
+  test("AC-35-1: ワンピースを登録すると、その名前の入ったタブで見つけられる (今日の画面とクローゼットの両方)", async () => {
+    const el = await render();
+    const names = () => [...el.querySelectorAll('[data-testid="garment"]')].map((b) => b.textContent);
+    expect(tab(el, "ワンピース")).toBeDefined();
+    expect(names()).not.toContain("花柄");
+    await click(tab(el, "ワンピース"));
+    expect(names()).toEqual(["花柄"]);
+    await click(button(el, "クローゼット"));
+    await click(tab(el, "ワンピース"));
+    expect(el.querySelector('[data-testid="shelf"]')?.getAttribute("data-shelf")).toBe("dress");
+    expect(el.querySelector('[data-testid="shelf"]')?.textContent).toContain("花柄");
   });
 });
 

@@ -4,7 +4,15 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, test } from "vitest";
 import { Stage } from "../../src/Avatar";
-import { BODICE_SHARE, BODY, SLOTS } from "../../src/outfit";
+import {
+  BODICE_SHARE,
+  BODY,
+  BOTTOM_MIN_WIDTH,
+  place,
+  shoeFeet,
+  SLOTS,
+  STAGE_RATIO as RATIO,
+} from "../../src/outfit";
 
 afterEach(() => document.body.replaceChildren());
 
@@ -125,7 +133,9 @@ describe("服が体を覆う (#26)", () => {
     expect(byKind.top?.height).toBe("auto");
     expect(byKind.outer?.height).toBe("auto");
     expect(byKind.bottom?.height).toBe("auto");
-    expect(byKind.shoes?.height).toBe("12%"); // くつは箱に収める
+    // くつは片足の箱 (半分の写真と同じ縦横比) に、箱の 2 倍の幅の写真を入れる (#32)
+    expect(byKind.shoes?.width).toBe("200%");
+    expect(byKind.shoes?.height).toBe("100%");
     for (const s of imgs.map((i) => i.style)) expect(s.transform).toBe("");
     const css = readFileSync("src/style.css", "utf8");
     for (const m of css.matchAll(/\.wear[^{]*\{([^}]*)\}/g))
@@ -137,5 +147,160 @@ describe("服が体を覆う (#26)", () => {
     expect(css).toContain("--stage-w: 200px;");
     expect(css).toContain("--stage-h: 400px;");
     expect(/\.stage \{([^}]*)\}/.exec(css)?.[1]).toContain("flex: none");
+  });
+});
+
+/** 写真を読み込んだことにする (横 × 縦)。 */
+async function loaded(img: HTMLImageElement, w: number, h: number) {
+  Object.defineProperty(img, "naturalWidth", { value: w, configurable: true });
+  Object.defineProperty(img, "naturalHeight", { value: h, configurable: true });
+  await act(async () => img.dispatchEvent(new Event("load")));
+}
+
+async function wearOne(kind: string): Promise<HTMLElement> {
+  const el = document.createElement("div");
+  document.body.appendChild(el);
+  await act(async () =>
+    createRoot(el).render(<Stage worn={[{ id: "x", kind, warmth: 2, label: kind, createdAt: 1 }]} />),
+  );
+  return el;
+}
+
+const pct = (v: string | undefined) => Number.parseFloat(v ?? "NaN");
+
+describe("くつを足に (#32)", () => {
+  test("AC-32-1: くつを着せると、左右の足の上にくつが重なる (足の間に浮かない)", async () => {
+    for (const ratio of [null, 0.3, 0.5, 0.8, 1.2]) {
+      const feet = shoeFeet(ratio);
+      feet.forEach((b, i) => {
+        const cx = BODY.feet[i] as number;
+        // 箱の真ん中が足の真ん中、箱は足の幅にかかり、足の間までは広がらない
+        expect(b.left + b.width / 2, `${ratio}`).toBeCloseTo(cx, 5);
+        expect(b.left, `${ratio}`).toBeLessThan(cx - BODY.footWidth / 4);
+        expect(b.left + b.width, `${ratio}`).toBeGreaterThan(cx + BODY.footWidth / 4);
+        expect(b.width, `${ratio}`).toBeLessThanOrEqual(BODY.footWidth + 3);
+        // 足の裏にそろう
+        expect(b.top + (b.height ?? 0), `${ratio}`).toBeCloseTo(BODY.sole + 0.5, 5);
+      });
+      const [l, r] = feet;
+      expect(l.left + l.width).toBeLessThan(50 - 10);
+      expect(r.left).toBeGreaterThan(50 + 10);
+    }
+    // 描いた台の上でも: 左右の足の箱が 2 つ、それぞれの足の位置に
+    const el = await wearOne("shoes");
+    const boxes = [...el.querySelectorAll<HTMLElement>('[data-testid="foot"]')];
+    expect(boxes.map((b) => b.dataset.foot)).toEqual(["left", "right"]);
+    for (const [i, b] of boxes.entries()) {
+      const cx = pct(b.style.left) + pct(b.style.width) / 2;
+      expect(cx).toBeCloseTo(BODY.feet[i] as number, 5);
+    }
+    // 読み上げは 1 足として 1 回だけ
+    expect(el.querySelectorAll('img[alt="shoes"]')).toHaveLength(1);
+  });
+
+  test("AC-32-2: 写真は曲げず、切り分けと大きさ・位置だけ変える", async () => {
+    const el = await wearOne("shoes");
+    const img = el.querySelector<HTMLImageElement>('[data-testid="worn"]') as HTMLImageElement;
+    await loaded(img, 240, 90); // 2 足を並べた横長の写真
+    const boxes = [...el.querySelectorAll<HTMLElement>('[data-testid="foot"]')];
+    for (const [i, b] of boxes.entries()) {
+      // 片足の箱の縦横比 = 写真の半分の縦横比 (台の幅 1% と高さ 1% は 1:2)
+      const w = pct(b.style.width);
+      const h = pct(b.style.height);
+      expect(h / RATIO / w).toBeCloseTo(90 / 120, 5);
+      // 中の写真は箱の 2 倍の幅・同じ高さ: 左の足は左半分、右の足は右半分
+      const p = b.querySelector("img")?.style;
+      expect(p?.width).toBe("200%");
+      expect(p?.height).toBe("100%");
+      expect(p?.left).toBe(i === 0 ? "0px" : "-100%");
+      expect(p?.transform).toBe("");
+      expect(b.style.transform).toBe("");
+    }
+    const css = readFileSync("src/style.css", "utf8");
+    expect(/\.wear-foot \{([^}]*)\}/.exec(css)?.[1]).toContain("overflow: hidden");
+    for (const m of css.matchAll(/\.wear-foot[^{]*\{([^}]*)\}/g))
+      expect(m[1]).not.toMatch(/transform|skew|object-fit: fill/);
+  });
+});
+
+describe("服の丈 (#33)", () => {
+  test("AC-33-1: 縦に長いパンツの写真 (縦 ÷ 横 2.3) を着せると、裾が足首の近く (台の 85% より下) まで届く", async () => {
+    for (const ratio of [1.5, 1.8, 2.3, 3]) {
+      const b = place("bottom", ratio);
+      if (b === null) throw new Error("bottom");
+      expect(b.height).toBeNull(); // 縦は写真のまま
+      expect(b.top + b.width * RATIO * ratio, `${ratio}`).toBeGreaterThan(85);
+    }
+    // 描いた台の上でも: 写真を読むと、丈から幅が決まる
+    const el = await wearOne("bottom");
+    const img = el.querySelector<HTMLImageElement>('[data-testid="worn"]') as HTMLImageElement;
+    await loaded(img, 100, 230);
+    expect(img.style.height).toBe("auto");
+    expect(pct(img.style.top) + pct(img.style.width) * RATIO * 2.3).toBeGreaterThan(85);
+  });
+
+  test("AC-33-2: アウターを着せると、中のトップスの襟元の一部が見える (全部は隠れない)", () => {
+    const top = place("top", 1) as { top: number; left: number; width: number };
+    const outer = place("outer", 1) as { top: number; left: number; width: number };
+    // アウターは少し下から始まり、トップスの襟元が台の高さの 1.5% 以上のぞく
+    expect(outer.top - top.top).toBeGreaterThanOrEqual(1.5);
+    // アウターはトップスより一回り大きい (両側に袖が出る)
+    expect(outer.left).toBeLessThan(top.left);
+    expect(outer.left + outer.width).toBeGreaterThan(top.left + top.width);
+    expect(SLOTS.outer?.z ?? 0).toBeGreaterThan(SLOTS.top?.z ?? 0);
+  });
+
+  test("AC-33-3: どの服も胴の下着を覆う (評価5の基準を保つ)。ボトムスはどの縦横比でも腰を覆う", () => {
+    for (const k of ["top", "dress", "outer"]) {
+      const s = place(k, 1);
+      if (s === null) throw new Error(k);
+      const side = (s.width * (1 - BODICE_SHARE)) / 2;
+      expect(s.left + side, k).toBeLessThanOrEqual(BODY.torsoLeft);
+      expect(s.left + s.width - side, k).toBeGreaterThanOrEqual(BODY.torsoRight);
+      expect(s.top, k).toBeLessThan(BODY.neck - 2);
+    }
+    for (let ratio = 0.5; ratio <= 4; ratio += 0.1) {
+      const b = place("bottom", ratio);
+      if (b === null) throw new Error("bottom");
+      expect(b.width).toBeGreaterThanOrEqual(BOTTOM_MIN_WIDTH);
+      const waist = (b.width * (1 - 0.75)) / 2;
+      expect(b.left + waist).toBeLessThanOrEqual(BODY.torsoLeft);
+      expect(b.left + b.width - waist).toBeGreaterThanOrEqual(BODY.torsoRight);
+      expect(b.top).toBeLessThan(BODY.hip - 6);
+      expect(b.left + b.width / 2).toBeCloseTo(50, 5);
+    }
+    // ふつうの丈のトップスは、ボトムスの上の端まで届く
+    const top = place("top", 0.9) as { top: number; width: number };
+    expect(top.top + top.width * RATIO * 0.9).toBeGreaterThanOrEqual(SLOTS.bottom?.top ?? 0);
+  });
+});
+
+describe("広い画面の台 (#34)", () => {
+  const css = readFileSync("src/style.css", "utf8");
+  const wide = /@media \(min-width: 768px\) \{\s*:root \{([^}]*)\}/.exec(css)?.[1] ?? "";
+  const px = (src: string, name: string) => Number(new RegExp(`${name}: (\\d+)px;`).exec(src)?.[1]);
+
+  test("AC-34-1: 幅 1280px (768px 以上) で台が 200×400 より大きい。縦横比は同じ", () => {
+    expect(px(wide, "--stage-w")).toBeGreaterThan(200);
+    expect(px(wide, "--stage-h")).toBeGreaterThan(400);
+    expect(px(wide, "--stage-w") / px(wide, "--stage-h")).toBe(RATIO);
+  });
+
+  test("AC-34-2: 同じ幅では、服を着せても台の大きさは変わらない (大きさは変数だけで決まる)", () => {
+    const rule = /\.stage \{([^}]*)\}/.exec(css)?.[1] ?? "";
+    expect(rule).toContain("width: var(--stage-w)");
+    expect(rule).toContain("height: var(--stage-h)");
+    expect(rule).toContain("flex: none");
+    // 変数を決めるのは :root の 2 か所 (ふつうと広い画面) だけ。服や中身の数では変えない
+    expect([...css.matchAll(/--stage-w:/g)]).toHaveLength(2);
+    expect([...css.matchAll(/--stage-h:/g)]).toHaveLength(2);
+  });
+
+  test("AC-34-3: 幅 360px では今と同じ大きさ (200×400)", () => {
+    const base = /:root \{([^}]*)\}/.exec(css)?.[1] ?? "";
+    expect(px(base, "--stage-w")).toBe(200);
+    expect(px(base, "--stage-h")).toBe(400);
+    expect(wide).not.toBe("");
+    expect(css.indexOf("@media (min-width: 768px)")).toBeGreaterThan(css.indexOf("--stage-w: 200px;"));
   });
 });

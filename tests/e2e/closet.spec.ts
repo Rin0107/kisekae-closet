@@ -43,7 +43,11 @@ async function authenticator(page: Page) {
 }
 
 /** ブラウザの canvas で服の絵 (PNG) を描く。 */
-async function garment(page: Page, color: string, shape: "top" | "bottom" | "outer"): Promise<Buffer> {
+async function garment(
+  page: Page,
+  color: string,
+  shape: "top" | "bottom" | "outer" | "shoes",
+): Promise<Buffer> {
   const b64 = await page.evaluate(
     ([c, s]) => {
       const cv = document.createElement("canvas");
@@ -54,7 +58,17 @@ async function garment(page: Page, color: string, shape: "top" | "bottom" | "out
       g.fillRect(0, 0, 300, 300);
       g.fillStyle = c as string;
       g.beginPath();
-      if (s === "bottom") {
+      if (s === "shoes") {
+        // 2 足を並べて上から撮った形 (左右にひとつずつ)
+        for (const x of [40, 170]) {
+          g.moveTo(x, 200);
+          g.lineTo(x + 20, 120);
+          g.lineTo(x + 70, 120);
+          g.lineTo(x + 90, 250);
+          g.lineTo(x, 250);
+          g.closePath();
+        }
+      } else if (s === "bottom") {
         g.moveTo(80, 20);
         g.lineTo(220, 20);
         g.lineTo(240, 290);
@@ -133,7 +147,7 @@ test("AC-21-1: 2 回目に開くと、Open-Meteo が 3 秒遅れても 2 秒以�
   await expect(page.getByTestId("weather-old")).toHaveCount(0, { timeout: 5000 });
 });
 
-test("AC-7-5 AC-9-2 AC-22-3 AC-25-1 AC-25-2 AC-27-3 AC-28-1 AC-28-2 AC-29-2: 服をしまい、着せ替えて、今日のコーデに決めると、カレンダーに載る。先の日の分も決めておける", async ({
+test("AC-7-5 AC-9-2 AC-22-3 AC-25-1 AC-25-2 AC-27-3 AC-28-1 AC-28-2 AC-29-2 AC-32-1 AC-33-1 AC-34-1 AC-34-3: 服をしまい、着せ替えて、今日のコーデに決めると、カレンダーに載る。先の日の分も決めておける", async ({
   page,
   baseURL,
 }) => {
@@ -160,6 +174,7 @@ test("AC-7-5 AC-9-2 AC-22-3 AC-25-1 AC-25-2 AC-27-3 AC-28-1 AC-28-2 AC-29-2: 服
   await stash(page, "トップス", "ピンクニット", 3, await garment(page, "#f2a7bb", "top"));
   await stash(page, "ボトムス", "デニム", 2, await garment(page, "#4a6fa5", "bottom"));
   await stash(page, "アウター", "トレンチ", 3, await garment(page, "#c8a97e", "outer"));
+  await stash(page, "くつ", "スニーカー", 1, await garment(page, "#3d3d4a", "shoes"));
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({ path: shot("closet") });
 
@@ -191,6 +206,29 @@ test("AC-7-5 AC-9-2 AC-22-3 AC-25-1 AC-25-2 AC-27-3 AC-28-1 AC-28-2 AC-29-2: 服
   expect([after?.width, after?.height]).toEqual([size?.width, size?.height]); // 台の大きさは変わらない
   await page.evaluate(() => window.scrollTo(0, 0));
 
+  // AC-32-1: くつは左右の足に 1 足ずつ (足の間に浮かない)
+  await page.getByRole("tab", { name: "くつ" }).click();
+  await page.getByRole("button", { name: "スニーカーを着る" }).click();
+  const feet = await stage.getByTestId("foot").evaluateAll((els) =>
+    els.map((e) => {
+      const s = (e.parentElement as HTMLElement).getBoundingClientRect();
+      const b = e.getBoundingClientRect();
+      return { cx: (b.left + b.width / 2 - s.left) / s.width, bottom: (b.bottom - s.top) / s.height };
+    }),
+  );
+  expect(feet).toHaveLength(2);
+  expect(feet[0]?.cx).toBeGreaterThan(0.23);
+  expect(feet[0]?.cx).toBeLessThan(0.33);
+  expect(feet[1]?.cx).toBeGreaterThan(0.67);
+  expect(feet[1]?.cx).toBeLessThan(0.77);
+  for (const f of feet) expect(f.bottom).toBeGreaterThan(0.9);
+  // AC-33-1: 長いパンツの裾は足首の近くまで (台の 85% より下)
+  const hem = await stage.getByRole("img", { name: "デニム" }).evaluate((i) => {
+    const s = (i.parentElement as HTMLElement).getBoundingClientRect();
+    return (i.getBoundingClientRect().bottom - s.top) / s.height;
+  });
+  expect(hem).toBeGreaterThan(0.85);
+
   await page.getByRole("button", { name: "これに決めた" }).click();
   await expect(page.getByTestId("stamp")).toBeVisible();
   await page.screenshot({ path: "test-results/decided.png", fullPage: true });
@@ -203,6 +241,14 @@ test("AC-7-5 AC-9-2 AC-22-3 AC-25-1 AC-25-2 AC-27-3 AC-28-1 AC-28-2 AC-29-2: 服
     expect(
       await part.evaluate((e) => new Set([...e.getClientRects()].map((r) => Math.round(r.top))).size),
     ).toBe(1);
+  // AC-34-3: 幅 360px では今と同じ 200×400
+  expect(await stage.boundingBox()).toMatchObject({ width: 200, height: 400 });
+  // AC-34-1: デスクトップ幅 (1280px) では台が大きい
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const wide = await stage.boundingBox();
+  expect(wide?.width).toBeGreaterThan(200);
+  expect(wide?.height).toBeGreaterThan(400);
+  await stage.screenshot({ path: "test-results/avatar-wide.png" });
   await page.setViewportSize({ width: 390, height: 844 });
 
   expect(await violations()).toEqual([]); // AC-25-2: 服をしまう・今日・着せ替えの画面 (読み直すと数え直しになる)

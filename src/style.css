@@ -604,7 +604,14 @@ input {
 .wear {
   object-position: 50% 0;
 }
-.wear-shoes {
+/* くつは左右の足に 1 足ずつ (#32)。箱から外の半分は見せない。写真は箱の 2 倍の幅で、曲げない */
+.wear-foot {
+  position: absolute;
+  overflow: hidden;
+  pointer-events: none;
+}
+.wear-foot .wear-shoes {
+  max-width: none;
   object-position: 50% 100%;
 }
 
@@ -699,5 +706,13 @@ input {
 @media (prefers-reduced-motion: reduce) {
   .wear-pending {
     animation: none;
+  }
+}
+
+/* 広い画面 (タブレット・デスクトップ) ではアバターの台を一回り大きく (#34)。縦横比は同じ (1:2)。その幅の中では固定 */
+@media (min-width: 768px) {
+  :root {
+    --stage-w: 280px;
+    --stage-h: 560px;
   }
 }
