@@ -110,6 +110,20 @@ export function cutout(px: Uint8ClampedArray, w: number, h: number, tol = TOLERA
   return { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
 }
 
+/**
+ * 切り抜いたあと、透明になった (背景だった) 画素がこの割合より少なければ、切り抜けなかったとみなす (#47)。
+ * 白い背景の白い服などで背景が残ると、写真全体の四角が体にかぶる。撮るときに知らせて撮り直しを選べるようにする。
+ */
+export const MIN_CLEAR = 0.08;
+
+/** 切り抜いたあとの px (RGBA) で、背景を切り抜けたか (透明な画素が MIN_CLEAR 以上)。 */
+export function cutoutWorked(px: Uint8ClampedArray, w: number, h: number): boolean {
+  const n = w * h;
+  let clear = 0;
+  for (let i = 0; i < n; i++) if ((px[i * 4 + 3] as number) === 0) clear++;
+  return clear >= n * MIN_CLEAR;
+}
+
 /** 切り抜く前に縮める大きさ (長辺)。 */
 export const CUT_SIDE = 512;
 
@@ -135,9 +149,16 @@ async function decode(
   return { img: bmp, w: bmp.width, h: bmp.height, done: () => bmp.close() };
 }
 
-async function render(src: string): Promise<string> {
+/** 切り抜いた写真の URL と、切り抜けたか (分からないときは true: 知らせない)。 */
+interface Cut {
+  url: string;
+  ok: boolean;
+}
+
+async function render(src: string): Promise<Cut> {
+  const plain = { url: src, ok: true };
   const d = await decode(src);
-  if (d === null) return src;
+  if (d === null) return plain;
   const { img } = d;
   const s = Math.min(1, CUT_SIDE / Math.max(d.w, d.h));
   const w = Math.max(1, Math.round(d.w * s));
@@ -148,45 +169,55 @@ async function render(src: string): Promise<string> {
   const g = c.getContext("2d");
   if (g === null) {
     d.done();
-    return src;
+    return plain;
   }
   g.drawImage(img, 0, 0, w, h);
   d.done();
   const data = g.getImageData(0, 0, w, h);
   const box = cutout(data.data, w, h);
-  if (box === null) return src;
+  const ok = cutoutWorked(data.data, w, h);
+  if (box === null) return { url: src, ok };
   g.putImageData(data, 0, 0);
   const out = document.createElement("canvas");
   out.width = box.w;
   out.height = box.h;
   out.getContext("2d")?.drawImage(c, box.x, box.y, box.w, box.h, 0, 0, box.w, box.h);
-  const blob = await new Promise<Blob | null>((ok) => out.toBlob(ok, "image/png"));
-  return blob === null ? src : URL.createObjectURL(blob);
+  const blob = await new Promise<Blob | null>((done) => out.toBlob(done, "image/png"));
+  return { url: blob === null ? src : URL.createObjectURL(blob), ok };
 }
 
 /** 切り抜いた写真を覚えておく数 (最近使ったものから)。追い出したものは blob: を手放す。 */
 export const CACHE_SIZE = 60;
-const cache = new Map<string, Promise<string>>();
+const cache = new Map<string, Promise<Cut>>();
 
-function release(src: string, p: Promise<string>) {
-  void p.then((url) => {
+function release(src: string, p: Promise<Cut>) {
+  void p.then(({ url }) => {
     if (url !== src) URL.revokeObjectURL(url);
   });
 }
 
-/** 切り抜いた写真の URL (blob:)。できない端末・失敗は元の URL。 */
-export function cutoutUrl(src: string): Promise<string> {
-  if (typeof createImageBitmap !== "function") return Promise.resolve(src);
+function cut(src: string): Promise<Cut> {
+  if (typeof createImageBitmap !== "function") return Promise.resolve({ url: src, ok: true });
   let p = cache.get(src);
-  if (p === undefined) p = render(src).catch(() => src);
+  if (p === undefined) p = render(src).catch(() => ({ url: src, ok: true }));
   cache.delete(src);
   cache.set(src, p); // 最近使ったものを後ろへ
   while (cache.size > CACHE_SIZE) {
-    const [old, q] = cache.entries().next().value as [string, Promise<string>];
+    const [old, q] = cache.entries().next().value as [string, Promise<Cut>];
     cache.delete(old);
     release(old, q);
   }
   return p;
+}
+
+/** 切り抜いた写真の URL (blob:)。できない端末・失敗は元の URL。 */
+export function cutoutUrl(src: string): Promise<string> {
+  return cut(src).then((c) => c.url);
+}
+
+/** 背景を切り抜けたか (#47)。切り抜けない端末・読めない写真は true (知らせない)。 */
+export function cutoutOk(src: string): Promise<boolean> {
+  return cut(src).then((c) => c.ok);
 }
 
 /** 消した服の切り抜きを手放す。 */

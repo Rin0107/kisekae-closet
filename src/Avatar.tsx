@@ -77,9 +77,14 @@ function Worn({ item: c, open = false }: { item: Clothing; open?: boolean }) {
     const box = { top: b.top, left: b.left, width: b.width, height: b.width * STAGE_RATIO * ratio };
     const ps = pieces(box, sleeves?.[0] ?? null, sleeves?.[1] ?? null, open && c.kind === "outer");
     const main = 1; // 身ごろ (左) の片に名前と testid を付ける (読み上げは 1 回だけ)
+    // 袖を先に (下に) 描く: 身ごろの縁と袖の付け根が重なっても、身ごろが上に見える (#44)
+    const order = ps
+      .map((p, i) => ({ p, i }))
+      .sort((a, b) => Number(a.p.turn === 0) - Number(b.p.turn === 0));
+    // 影は服 1 枚分の入れ物に付ける (片ごとに付けると、継ぎ目に縦の線が出る、#47)
     return (
-      <>
-        {ps.map((p, i) => (
+      <span className="wear-cut" data-testid="wear-cut" style={{ zIndex: SLOTS[c.kind]?.z }}>
+        {order.map(({ p, i }) => (
           <span
             key={i}
             className="wear-piece"
@@ -111,7 +116,7 @@ function Worn({ item: c, open = false }: { item: Clothing; open?: boolean }) {
             />
           </span>
         ))}
-      </>
+      </span>
     );
   }
   return (

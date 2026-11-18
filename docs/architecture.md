@@ -69,3 +69,8 @@ Cloudflare で動くのは版固定の wrangler だけ (工場の書いたコー
 - 2026-11-19 アバターの体を CC0 の 3D の人体 (MakeHuman の base mesh と体型の target) を Blender (Cycles、正面の正投影) で描いた WebP に置きかえた (#22)。枠は前の SVG と同じ (頭のてっぺん 3.5%・足の裏 93%) にそろえたので、`SLOTS` は変えていない。描き出しのスクリプトは repo に置かない (使い捨て。手順は `public/avatar/LICENSE.md`)
 - 2026-11-17 先の日のコーデは今の `outfits` に未来の日付で置く (migrations を変えない)。予報は Open-Meteo の上限の 16 日 (今日を含む) を 1 回で読む。それより先 (例年の値)・旅行先の市は次の版
 - 2026-11-19 服を幅で合わせて重ねるようにした (#26)。体の絵の画素を測った目印を `outfit.ts` の `BODY` に置き、`SLOTS` はそれに合わせた。zod の JIT を切った (`src/zod-setup.ts`、new Function の下調べが CSP 違反として報告されるため、#25)
+
+## 天気が読めないうちに決めたコーデ (#46)
+D1 のコーデはその日の気温・湿度・降水量を必ず持つ (migrations は守りの部分で、欄を空にできない)。
+天気が読めないうちに「これに決めた」を押したら、日付と服の ID だけを端末 (`kisekae-closet:pending`) に置き、
+その日の天気が読めたら いつものコーデとして保存して端末から消す (`App.tsx` の `decideLater` と保存の effect)。今日より前のものは捨てる。

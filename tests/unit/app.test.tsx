@@ -325,6 +325,79 @@ describe("ログインのあと: 今日の画面", () => {
     expect(button(el, "これに決めた")).toBeUndefined();
   });
 
+  test("AC-46-1: 天気が読めず前回の予報もなくても、服を着せれば「これに決めた」で決められ、天気が読めたらカレンダーに保存する", async () => {
+    const api = vi.mocked(fetch).getMockImplementation() as typeof fetch;
+    let offline = true;
+    vi.mocked(fetch).mockImplementation(async (url, init) => {
+      if (offline && String(url).startsWith("https://api.open-meteo.com/")) throw new Error("offline");
+      return api(url, init);
+    });
+    const el = await render();
+    await settle();
+    expect(el.querySelector('[data-testid="weather-failed"]')).not.toBeNull();
+    expect(button(el, "これに決めた")).toBeUndefined(); // まだ何も着ていない
+    await click(el.querySelector('[aria-label="ニットを着る"]'));
+    await click(button(el, "これに決めた"));
+    expect(calls.some((c) => c.startsWith("POST outfits"))).toBe(false); // 天気の数字がまだない
+    expect(el.querySelector('[data-testid="stamp"]')?.textContent).toBe("決めた!");
+    expect(el.textContent).toContain("天気が読めたら、その日の天気と一緒にカレンダーに保存します");
+    expect(button(el, "これに決めた")).toBeUndefined();
+    expect(JSON.parse(localStorage.getItem("kisekae-closet:pending") ?? "null")).toEqual({
+      wornOn: today(),
+      itemIds: ["t2"],
+    });
+    // 天気が読めたら、決めたコーデをその日の天気と一緒に保存し、端末からは消す
+    offline = false;
+    routes.outfits = (m) =>
+      m === "POST"
+        ? [201, { id: "o" }]
+        : [200, { outfits: [{ ...PAST[0], id: "o", wornOn: today(), itemIds: ["t2"] }] }];
+    await click(button(el, "もう一度読む"));
+    await settle();
+    const post = calls.find((c) => c.startsWith("POST outfits"));
+    expect(JSON.parse(post?.slice("POST outfits ".length) ?? "{}")).toEqual({
+      wornOn: today(),
+      itemIds: ["t2"],
+      tempMax: 30,
+      tempMin: 24,
+      humidity: 60,
+      precip: 0,
+    });
+    expect(localStorage.getItem("kisekae-closet:pending")).toBeNull();
+    expect(el.querySelector('[data-testid="stamp"]')?.textContent).toBe("決めた!");
+    expect(el.textContent).toContain("今日のコーデはカレンダーに載りました");
+  });
+
+  test("AC-46-2: 天気なしで決めた日のカレンダーのマスは、天気の印なしでスタンプが出て、押すと保存待ちと分かる", async () => {
+    const api = vi.mocked(fetch).getMockImplementation() as typeof fetch;
+    vi.mocked(fetch).mockImplementation(async (url, init) => {
+      if (String(url).startsWith("https://api.open-meteo.com/")) throw new Error("offline");
+      return api(url, init);
+    });
+    const el = await render();
+    await settle();
+    await click(el.querySelector('[aria-label="ニットを着る"]'));
+    await click(button(el, "これに決めた"));
+    await click(tab(el, "カレンダー"));
+    const cell = el.querySelector(`[data-testid="day-${today()}"]`) as HTMLElement;
+    expect(cell.querySelector('[data-testid="mini"]')).toBeNull();
+    expect(cell.querySelector('[data-testid="day-stamp"]')).not.toBeNull();
+    expect(cell.getAttribute("aria-label")).toContain("決めた日");
+    await click(cell);
+    expect(el.querySelector('[data-testid="picked-held"]')?.textContent).toContain("天気が読めたら");
+    // 開き直しても、決めたコーデは残る (端末に置いてある)。昨日より前のものは捨てる
+    document.body.replaceChildren();
+    const again = await render();
+    await settle();
+    expect(again.querySelector('[data-testid="stamp"]')).not.toBeNull();
+    expect(worn(again)).toEqual(["ニット"]);
+    document.body.replaceChildren();
+    localStorage.setItem("kisekae-closet:pending", JSON.stringify({ wornOn: "2000-01-01", itemIds: ["t2"] }));
+    const old = await render();
+    await settle();
+    expect(old.querySelector('[data-testid="stamp"]')).toBeNull();
+  });
+
   test("天気: 読み込み中と、読めなかった (200 でない・形が違う) を分けて出す", async () => {
     let release = () => {};
     const api = vi.mocked(fetch).getMockImplementation() as typeof fetch;
@@ -400,6 +473,41 @@ describe("クローゼットから着せる", () => {
     await click(el.querySelector('[aria-label="花柄を着る"]'));
     expect(worn(el)).not.toContain("デニム");
     expect(worn(el)).toContain("花柄");
+  });
+
+  test("AC-45-1: 棚の着ている服をもう一度タップすると脱げ、アバターから消え、ゲージのつまみが動く", async () => {
+    const el = await render();
+    const left = () => (el.querySelector('[data-testid="gauge-thumb"]') as HTMLElement).style.left;
+    await click(tab(el, "アウター"));
+    const coat = () => el.querySelector('[aria-label="コートを着る"]') as HTMLElement;
+    await click(coat());
+    expect(worn(el)).toContain("コート");
+    expect(coat().getAttribute("aria-pressed")).toBe("true");
+    const on = parseFloat(left());
+    const sparkles = el.querySelectorAll('[data-testid="sparkle"]').length;
+    await click(coat()); // もう一度押すと脱ぐ
+    expect(worn(el)).not.toContain("コート");
+    expect(coat().getAttribute("aria-pressed")).toBe("false");
+    expect(parseFloat(left())).toBeLessThan(on);
+    expect(el.querySelectorAll('[data-testid="sparkle"]').length).toBe(sparkles); // 脱ぐときはキラッとしない
+    await click(coat()); // また押すと着る
+    expect(worn(el)).toContain("コート");
+  });
+
+  test("AC-45-2: 着ている服をドラッグして台に落としても脱がない (タップで脱ぐ)", async () => {
+    const el = await render();
+    const stage = el.querySelector('[data-testid="stage"]') as HTMLElement;
+    stage.getBoundingClientRect = () => ({ left: 0, top: 0, right: 200, bottom: 400 }) as DOMRect;
+    const knit = el.querySelector('[aria-label="ニットを着る"]') as HTMLElement;
+    await click(knit);
+    expect(worn(el)).toContain("ニット");
+    await pointer(knit, "pointerdown", 100, 600);
+    await pointer(knit, "pointermove", 100, 300);
+    await pointer(knit, "pointerup", 100, 300);
+    await click(knit); // ドラッグのあとの click
+    expect(worn(el)).toContain("ニット");
+    await click(knit);
+    expect(worn(el)).not.toContain("ニット");
   });
 
   test("AC-2-3: カードをアバターにドラッグして離すと着る。外で離せば着ない", async () => {

@@ -11,11 +11,11 @@ import {
 } from "react";
 import { z } from "zod";
 import { Stage } from "./Avatar";
-import { forgetCutout } from "./cutout";
+import { cutoutOk, forgetCutout } from "./cutout";
 import { Photo } from "./Photo";
 import { LIKENESS_NAMES, likeness, monthGrid, shiftMonth, sky, SKY_NAMES, type Sky } from "./calendar";
 import { api, ApiError, type Clothing, type Outfit } from "./client";
-import { BAND_NAMES, dressIn, gauge, wear } from "./outfit";
+import { BAND_NAMES, dressIn, gauge, takeOff, wear } from "./outfit";
 import { login, register } from "./passkey";
 import { recommend } from "./recommend";
 import { shrinkPhoto } from "./shrink";
@@ -98,6 +98,7 @@ export function App() {
   const out = useCallback(() => {
     // ログインしていない端末に予報を残さない (次に開いたとき、ログインの前に読みに行かないように)
     forget("forecast");
+    forget("pending");
     setState("out");
   }, []);
   useEffect(() => applyTheme(themeById(load("theme", ThemeId, DEFAULT_THEME))), []);
@@ -141,6 +142,19 @@ function Welcome({ onIn }: { onIn: () => void }) {
 }
 
 const NO_FORECAST: ReadonlyMap<string, Weather> = new Map();
+
+/**
+ * 天気が読めないうちに決めたコーデ (#46)。サーバーはその日の気温と湿度が要るので、天気が読めたら保存する。
+ * 端末だけに置く (服の ID と日付だけ)。
+ */
+const Pending = z.object({
+  wornOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  itemIds: z.array(z.string().min(1).max(64)).min(1).max(20),
+});
+type Pending = z.infer<typeof Pending>;
+
+const sameItems = (ids: string[], items: Clothing[]) =>
+  ids.length === items.length && items.every((c) => ids.includes(c.id));
 type Tab = "today" | "closet" | "calendar";
 const TABS: { id: Tab; name: string }[] = [
   { id: "today", name: "今日" },
@@ -165,6 +179,12 @@ function Home({ first, onOut }: { first: FirstForecast | null; onOut: () => void
   const [worn, setWorn] = useState<Clothing[] | null>(null);
   const [sparkle, setSparkle] = useState(0);
   const [error, setError] = useState("");
+  // 天気が読めないうちに決めたコーデ (#46)。今日より前の日のものは、もう保存できないので捨てる
+  const [pending, setPending] = useState<Pending | null>(() => {
+    const p = load("pending", Pending.nullable(), null);
+    return p !== null && p.wornOn >= today() ? p : null;
+  });
+  const sending = useRef(false);
 
   const fail = useCallback(
     (e: unknown) => (e instanceof ApiError && e.status === 401 ? onOut() : setError(message(e))),
@@ -227,12 +247,15 @@ function Home({ first, onOut }: { first: FirstForecast | null; onOut: () => void
   const isToday = plan === today();
   const weather = forecast.get(plan) ?? null;
   const decided = outfits.find((o) => o.wornOn === day);
+  const held = pending !== null && pending.wornOn === day ? pending : null;
   const base =
-    decided !== undefined
-      ? dressIn(clothes, decided.itemIds)
-      : weather === null
-        ? []
-        : recommend(clothes, outfits, weather, day);
+    held !== null
+      ? dressIn(clothes, held.itemIds)
+      : decided !== undefined
+        ? dressIn(clothes, decided.itemIds)
+        : weather === null
+          ? []
+          : recommend(clothes, outfits, weather, day);
   // 消した服は着ていられない
   const current = (worn ?? base).filter((c) => clothes.some((x) => x.id === c.id));
 
@@ -244,13 +267,13 @@ function Home({ first, onOut }: { first: FirstForecast | null; onOut: () => void
     setWorn(items);
     setSparkle((n) => n + 1);
   };
-  const decide = (w: Weather) => () => {
-    setError("");
-    api.addOutfit({ wornOn: day, itemIds: current.map((i) => i.id), ...w }).then(() => {
-      setWorn(null);
+  /** その日のコーデを天気と一緒に保存する。決め直しなら前のものを消す。 */
+  const store = (wornOn: string, itemIds: string[], w: Weather) => {
+    const before = outfits.find((o) => o.wornOn === wornOn);
+    return api.addOutfit({ wornOn, itemIds, ...w }).then(() => {
       // 決め直し: 新しいものを足せたら、前のものを消す。消せなくても新しいほうが今日のコーデ
       const old =
-        decided === undefined ? Promise.resolve() : api.deleteOutfit(decided.id).then(() => undefined);
+        before === undefined ? Promise.resolve() : api.deleteOutfit(before.id).then(() => undefined);
       old
         .catch((e: unknown) =>
           e instanceof ApiError && e.status === 401
@@ -258,12 +281,42 @@ function Home({ first, onOut }: { first: FirstForecast | null; onOut: () => void
             : setError("前のコーデを消せませんでした (新しいコーデは保存しました)"),
         )
         .finally(reload);
-    }, fail);
+    });
   };
-  const isDecided =
-    decided !== undefined &&
-    decided.itemIds.length === current.length &&
-    current.every((c) => decided.itemIds.includes(c.id));
+  const decide = (w: Weather) => () => {
+    setError("");
+    store(
+      day,
+      current.map((i) => i.id),
+      w,
+    ).then(() => setWorn(null), fail);
+  };
+  // 天気が読めないときは、端末に置いておき、読めたら保存する (#46)
+  const decideLater = () => {
+    setError("");
+    const p = { wornOn: day, itemIds: current.map((i) => i.id) };
+    save("pending", p);
+    setPending(p);
+    setWorn(null);
+    setSparkle((n) => n + 1);
+  };
+  const pendingWeather = pending === null ? null : (forecast.get(pending.wornOn) ?? null);
+  useEffect(() => {
+    if (pending === null || pendingWeather === null || !loaded || sending.current) return;
+    sending.current = true;
+    store(pending.wornOn, pending.itemIds, pendingWeather)
+      .then(() => {
+        forget("pending");
+        setPending(null);
+      }, fail)
+      .finally(() => {
+        sending.current = false;
+      });
+    // store は毎回作り直すので、保存するきっかけ (天気・決めておいたもの・服の一覧) だけを見る
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pending, pendingWeather, loaded]);
+  const isHeld = held !== null && sameItems(held.itemIds, current);
+  const isDecided = isHeld || (held === null && decided !== undefined && sameItems(decided.itemIds, current));
 
   return (
     <div className="app">
@@ -331,17 +384,24 @@ function Home({ first, onOut }: { first: FirstForecast | null; onOut: () => void
               worn={current}
               sparkle={sparkle}
               onWear={(c) => put(wear(current, c))}
+              onTakeOff={(c) => setWorn(takeOff(current, c.id))}
               weather={weather}
               stamp={isDecided}
               stampNote={
-                isToday
-                  ? "今日のコーデはカレンダーに載りました"
-                  : `${md(plan)}のコーデとしてカレンダーに載りました`
+                isHeld
+                  ? "天気が読めたら、その日の天気と一緒にカレンダーに保存します"
+                  : isToday
+                    ? "今日のコーデはカレンダーに載りました"
+                    : `${md(plan)}のコーデとしてカレンダーに載りました`
               }
               onGoCloset={() => setTab("closet")}
               decide={
-                weather && current.length > 0 && !isDecided ? (
-                  <button type="button" className="primary decide" onClick={decide(weather)}>
+                current.length > 0 && !isDecided ? (
+                  <button
+                    type="button"
+                    className="primary decide"
+                    onClick={weather ? decide(weather) : decideLater}
+                  >
                     これに決めた
                   </button>
                 ) : null
@@ -354,6 +414,7 @@ function Home({ first, onOut }: { first: FirstForecast | null; onOut: () => void
           <CalendarRoom
             clothes={clothes}
             outfits={outfits}
+            pending={pending}
             today={today()}
             weather={forecast.get(today()) ?? null}
             forecast={forecast}
@@ -525,6 +586,7 @@ function Dresser({
   worn,
   sparkle,
   onWear,
+  onTakeOff,
   weather,
   stamp,
   stampNote,
@@ -537,6 +599,8 @@ function Dresser({
   worn: Clothing[];
   sparkle: number;
   onWear: (c: Clothing) => void;
+  /** 着ている服をもう一度押すと脱ぐ (#45) */
+  onTakeOff: (c: Clothing) => void;
   weather: Weather | null;
   stamp: boolean;
   stampNote: string;
@@ -577,7 +641,10 @@ function Dresser({
     // ドラッグのあとの click は、もう着せたか、外に落としたもの
     const dragged = start.current?.moved === true;
     start.current = null;
-    if (!dragged) onWear(item);
+    if (dragged) return;
+    // 着ている服をもう一度押すと脱ぐ (#45)。ドラッグで台に落としたときは着たまま
+    if (worn.some((w) => w.id === item.id)) onTakeOff(item);
+    else onWear(item);
   };
 
   const kinds = SHELVES.find((s) => s.id === shelf)?.kinds ?? [];
@@ -703,6 +770,20 @@ function ClosetRoom({
     },
     [preview],
   );
+  // 背景を切り抜けなかった写真 (白い背景の白い服など、#47)。知らせて、撮り直しを選べる
+  const [badCut, setBadCut] = useState<string | null>(null);
+  useEffect(() => {
+    if (!preview) return;
+    let live = true;
+    void cutoutOk(preview).then((ok) => {
+      if (live) setBadCut(ok ? null : preview);
+    });
+    return () => {
+      live = false;
+    };
+  }, [preview]);
+  // 撮り直すとき、ファイルの欄を空に戻す (同じ写真を選び直しても読み込む)
+  const [picker, setPicker] = useState(0);
 
   const add = async (k: string) => {
     setNote("");
@@ -714,6 +795,7 @@ function ClosetRoom({
     setKind(null);
     setLabel("");
     setFile(null);
+    setPicker((n) => n + 1);
     setWarmth(3);
     onChange();
   };
@@ -745,6 +827,7 @@ function ClosetRoom({
           <label className="file">
             <span className="file-title">写真を撮る・選ぶ</span>
             <input
+              key={picker}
               type="file"
               accept="image/*"
               capture="environment"
@@ -752,6 +835,23 @@ function ClosetRoom({
               onChange={(e) => setFile(e.target.files?.[0] ?? null)}
             />
           </label>
+          {preview && badCut === preview && (
+            <div className="cut-bad" role="status" data-testid="cut-bad">
+              <p>
+                背景と服の色が近くて、切り抜けませんでした。このままだと写真の四角ごとアバターに重なります。色のちがう壁や布の前で撮ってください。
+              </p>
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => {
+                  setFile(null);
+                  setPicker((n) => n + 1);
+                }}
+              >
+                撮り直す
+              </button>
+            </div>
+          )}
           <div className="warmth" role="group" aria-label="暖かさ">
             <span>暖かさ</span>
             {[1, 2, 3, 4, 5].map((n) => (
@@ -828,6 +928,7 @@ const md = (d: string) => `${Number(d.slice(5, 7))}月${Number(d.slice(8))}日`;
 function CalendarRoom({
   clothes,
   outfits,
+  pending,
   today: day,
   weather,
   forecast,
@@ -836,6 +937,8 @@ function CalendarRoom({
 }: {
   clothes: Clothing[];
   outfits: Outfit[];
+  /** 天気が読めたら保存する、決めたコーデ (#46) */
+  pending: Pending | null;
   today: string;
   weather: Weather | null;
   forecast: ReadonlyMap<string, Weather>;
@@ -891,12 +994,13 @@ function CalendarRoom({
               {week.map((d, j) => {
                 if (d === null) return <td key={j} />;
                 const o = byDay.get(d);
+                const held = o === undefined && pending !== null && pending.wornOn === d;
                 const w = o ?? forecast.get(d) ?? null;
                 const ahead = d > day;
                 const like = o && weather && d !== day ? likeness(weather, o) : undefined;
                 const words = [
                   `${md(d)}`,
-                  o ? (ahead ? "決めておいた日" : "決めた日") : "",
+                  o || held ? (ahead ? "決めておいた日" : "決めた日") : "",
                   like && like !== "far" ? LIKENESS_NAMES[like] : "",
                 ];
                 return (
@@ -918,9 +1022,9 @@ function CalendarRoom({
                           <span>{Math.round(w.humidity)}%</span>
                         </span>
                       )}
-                      {o && (
+                      {(o || held) && (
                         <span
-                          className={`day-stamp ${ahead ? "plan" : ""}`}
+                          className={`day-stamp ${ahead ? "plan" : ""} ${held ? "held" : ""}`}
                           data-testid={ahead ? "day-plan" : "day-stamp"}
                           aria-hidden="true"
                         >
@@ -950,6 +1054,10 @@ function CalendarRoom({
                 {md(picked)}は先すぎて、まだ天気の予報がありません (15 日先まで決めておけます)。
               </p>
             )
+          ) : chosen === undefined && pending !== null && pending.wornOn === picked ? (
+            <p className="muted" data-testid="picked-held">
+              {md(picked)}のコーデは決めてあります。天気が読めたら、その日の天気と一緒に保存します。
+            </p>
           ) : chosen === undefined ? (
             <p className="muted">{md(picked)}は、まだコーデを決めていません。</p>
           ) : (

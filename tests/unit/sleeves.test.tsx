@@ -8,13 +8,16 @@ import type { Clothing } from "../../src/client";
 import {
   ARM_ANGLE,
   BODY,
+  bodiceEdge,
+  CUT_SAFE,
+  EDGE_MARGIN,
   measureSleeve,
+  sleeveOrigin,
+  sleevePoints,
   OPEN_GAP,
   pieces,
   place,
   sleeveTurn,
-  SLEEVE_SHARE,
-  armX,
   STAGE_RATIO,
   turnPoint,
   TURN_MAX,
@@ -31,16 +34,6 @@ function shirt(x: number, y: number): boolean {
   if (x >= 24 && x < 76) return true; // 身ごろ
   const sx = x < 50 ? x : W - 1 - x; // 左右同じ
   return sx >= 4 && sx < 24 && y >= 5 && y < 70; // 袖
-}
-
-/** 左の袖の先 (写真の袖の帯の左下、x 4%・y 70% のあたり) が、回したあとに台のどこに来るか。 */
-function leftTip(p: Piece) {
-  const o = {
-    x: p.box.left + (p.origin.x / 100) * p.box.width,
-    y: p.box.top + (p.origin.y / 100) * p.box.height,
-  };
-  const fx = 0.04 / SLEEVE_SHARE; // 片の中の割合
-  return turnPoint({ x: p.box.left + fx * p.box.width, y: p.box.top + 0.69 * p.box.height }, o, p.turn);
 }
 
 const BOX = (() => {
@@ -73,36 +66,33 @@ async function wearLoaded(worn: Clothing[]): Promise<HTMLElement> {
 }
 
 describe("袖を腕の向きに (#37)", () => {
-  test("AC-37-1: トップスの袖は腕の向きに回って置かれ、袖の先が腕の外の線の近くにある", () => {
+  test("AC-37-1: トップスの袖は腕の向きに回って置かれる (外へ回す。左右対称)", () => {
     expect(ARM_ANGLE).toBeCloseTo((Math.atan(0.7) * 180) / Math.PI, 5); // 約 35 度
     const s = measureSleeve(shirt, W, H);
     expect(s).not.toBeNull();
-    expect(s?.pivot).toBeCloseTo(0.05, 5);
+    expect(s?.top).toBeCloseTo(0.05, 5);
     expect(s?.angle).toBeLessThan(ARM_ANGLE); // 写真の袖は腕より真っすぐ下を向いている
     const right = measureSleeve((x, y) => shirt(W - 1 - x, y), W, H);
     expect(right).toEqual(s); // 左右同じ形なら同じ
+    const cut = s?.cut ?? 0;
     const ps = pieces(BOX, s, right, false);
     expect(ps.map((p) => [p.from, p.to])).toEqual([
-      [0, SLEEVE_SHARE],
-      [SLEEVE_SHARE, 1 - SLEEVE_SHARE],
-      [1 - SLEEVE_SHARE, 1],
+      [0, cut],
+      [cut, 1 - cut],
+      [1 - cut, 1],
     ]);
     const [l, , r] = ps as [Piece, Piece, Piece];
     expect(l.turn).toBeGreaterThan(0); // 左は外 (時計回り)
     expect(l.turn).toBeLessThanOrEqual(TURN_MAX);
     expect(r.turn).toBeCloseTo(-l.turn, 5); // 右は反時計回り
-    // 回す前より、回したあとのほうが、袖の先が腕の外の線に近い (台の幅の 5% 以内)
-    const flat = leftTip({ ...l, turn: 0 });
-    const tip = leftTip(l);
-    expect(Math.abs(tip.x - armX(tip.y))).toBeLessThan(Math.abs(flat.x - armX(flat.y)));
-    expect(Math.abs(tip.x - armX(tip.y))).toBeLessThanOrEqual(1);
+    expect((s?.angle ?? 0) + l.turn).toBeCloseTo(ARM_ANGLE, 5); // 回したあとは腕の向き
   });
 
   test("AC-37-1: 回す角度には上限がある。袖のない写真・切り抜けていない写真は回さない", () => {
     expect(sleeveTurn(BOX, null)).toBe(0);
-    // 袖の先が上を向いていて、どれだけ回しても腕の線の内側なら、回しても上限まで。ずっと外なら下限まで
-    expect(sleeveTurn(BOX, { pivot: 0.9, angle: 160, tip: { x: 0, y: 0 } })).toBe(TURN_MAX);
-    expect(sleeveTurn(BOX, { pivot: 0.05, angle: 80, tip: { x: -2, y: 0.5 } })).toBe(TURN_MIN);
+    const base = { cut: 0.24, top: 0.05, pivot: 0.2, tip: { x: 0.2, y: 0.4 } };
+    expect(sleeveTurn(BOX, { ...base, angle: -60 })).toBe(TURN_MAX);
+    expect(sleeveTurn(BOX, { ...base, angle: 170 })).toBe(TURN_MIN);
     expect(measureSleeve(() => true, W, H)).toBeNull(); // 全部不透明 (背景が残った写真)
     expect(measureSleeve((x) => x >= 24 && x < 76, W, H)).toBeNull(); // 袖なし
   });
@@ -140,6 +130,183 @@ describe("袖を腕の向きに (#37)", () => {
     expect(el.querySelectorAll('img[alt="t1"]')).toHaveLength(1);
     const css = readFileSync("src/style.css", "utf8");
     expect(/\.wear-piece \{([^}]*)\}/.exec(css)?.[1]).toContain("overflow: hidden");
+  });
+});
+
+/** 多角形を塗った W×H の写真 (切り抜いたあとの形。服の外は透明)。 */
+function poly(shapes: number[][][], w: number, h: number) {
+  const inside = (pts: number[][], x: number, y: number) => {
+    let on = false;
+    for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+      const [xi, yi] = pts[i] as [number, number];
+      const [xj, yj] = pts[j] as [number, number];
+      if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) on = !on;
+    }
+    return on;
+  };
+  return (x: number, y: number) =>
+    x >= 0 && y >= 0 && x < w && y < h && shapes.some((p) => inside(p, x + 0.5, y + 0.5));
+}
+
+/** 見本の服 (e2e と同じ形を、切り抜いて服の大きさに詰めたもの)。 */
+const GARMENTS = {
+  // 袖が斜めに張り出した半袖 (240×250)
+  tee: {
+    w: 240,
+    h: 250,
+    shapes: [
+      [
+        [45, 20],
+        [85, 0],
+        [155, 0],
+        [195, 20],
+        [240, 100],
+        [195, 115],
+        [180, 80],
+        [180, 250],
+        [60, 250],
+        [60, 80],
+        [45, 115],
+        [0, 100],
+      ],
+    ],
+  },
+  // 袖を横に広げた T シャツ (260×255)
+  wide: {
+    w: 260,
+    h: 255,
+    shapes: [
+      [
+        [0, 15],
+        [90, 0],
+        [170, 0],
+        [260, 15],
+        [260, 65],
+        [190, 70],
+        [190, 255],
+        [70, 255],
+        [70, 70],
+        [0, 65],
+      ],
+    ],
+  },
+  // 袖が真っすぐ垂れた長袖 (220×270)。袖は身ごろから離れている
+  long: {
+    w: 220,
+    h: 270,
+    shapes: [
+      [
+        [55, 10],
+        [90, 0],
+        [130, 0],
+        [165, 10],
+        [165, 270],
+        [55, 270],
+      ],
+      [
+        [55, 10],
+        [30, 20],
+        [0, 235],
+        [30, 240],
+        [52, 75],
+      ],
+      [
+        [165, 10],
+        [190, 20],
+        [220, 235],
+        [190, 240],
+        [168, 75],
+      ],
+    ],
+  },
+} as const;
+
+const measured = (g: { w: number; h: number; shapes: readonly (readonly (readonly number[])[])[] }) => {
+  const op = poly(g.shapes as number[][][], g.w, g.h);
+  return {
+    op,
+    left: measureSleeve(op, g.w, g.h),
+    right: measureSleeve((x, y) => op(g.w - 1 - x, y), g.w, g.h),
+    box: (() => {
+      const b = place("top", g.h / g.w);
+      if (b === null) throw new Error("top");
+      return { top: b.top, left: b.left, width: b.width, height: b.width * STAGE_RATIO * (g.h / g.w) };
+    })(),
+  };
+};
+
+describe("袖を腕と同じ角度に (#44)", () => {
+  test("AC-44-1: 長袖・アウター・T シャツの袖の向き (付け根から袖の重心) が、回したあとアバターの腕の向きと 10° 以内", () => {
+    for (const [name, g] of Object.entries(GARMENTS)) {
+      const { left, right, box } = measured(g);
+      expect(left, name).not.toBeNull();
+      const [l, , r] = pieces(box, left, right, false) as [Piece, Piece, Piece];
+      expect(Math.abs((left?.angle ?? 0) + l.turn - ARM_ANGLE), name).toBeLessThanOrEqual(10);
+      expect(Math.abs((right?.angle ?? 0) - r.turn - ARM_ANGLE), name).toBeLessThanOrEqual(10);
+    }
+    // アウター (前を開けて着る) でも袖は同じに回る
+    const { left, right, box } = measured(GARMENTS.long);
+    const o = pieces(box, left, right, true);
+    expect(o).toHaveLength(4);
+    expect(Math.abs((left?.angle ?? 0) + (o[0] as Piece).turn - ARM_ANGLE)).toBeLessThanOrEqual(10);
+  });
+
+  test("AC-44-2: 広げた T シャツ (袖が水平) の写真でも、袖は下向きに回って腕に沿い、上向きに回らない", () => {
+    const { left, box } = measured(GARMENTS.wide);
+    expect(left?.angle).toBeGreaterThan(70); // 写真ではほぼ水平
+    const t = sleeveTurn(box, left);
+    expect(t).toBeLessThan(0); // 内 (下) へ回す
+    const a = (left?.angle ?? 0) + t;
+    expect(a).toBeGreaterThan(0); // 下を向いている (上へ回らない)
+    expect(a).toBeLessThan(90);
+    // 回したあとの袖の先は、回す中心より下
+    if (left === null) throw new Error("袖");
+    const { pivot, tip } = sleevePoints(box, left, t);
+    expect(turnPoint(tip, pivot, t).y).toBeGreaterThan(pivot.y);
+  });
+
+  test("AC-44-3 AC-47-2: 袖の片に身ごろの縁が入らず (細い線のかけらが出ない)、内へ回すときは肩の縫い目を中心にする (肩にすき間がない)。影は服 1 枚にまとめて付け、継ぎ目に線を出さない", async () => {
+    for (const [name, g] of Object.entries(GARMENTS)) {
+      const { op, left } = measured(g);
+      const edge = bodiceEdge(op, g.w, g.h) ?? 0;
+      expect((left?.cut ?? 0) * g.w, name).toBeCloseTo(edge - Math.round(g.w * CUT_SAFE), 5);
+      // 袖の片 (0〜cut) の、裾に近い行 (袖より下) には何もない: 身ごろの縁を袖と一緒に回さない
+      const band = Math.round((left?.cut ?? 0) * g.w);
+      for (let y = Math.floor(g.h * 0.92); y < g.h; y++)
+        for (let x = 0; x < band; x++) expect(op(x, y), `${name} ${x},${y}`).toBe(false);
+    }
+    const tee = measured(GARMENTS.tee).left;
+    if (tee === null) throw new Error("袖");
+    expect(sleeveOrigin(tee, -5)).toBe(tee.top); // 内へ: 肩の縫い目
+    expect(sleeveOrigin(tee, 5)).toBe(tee.pivot); // 外へ: 付け根の真ん中
+    expect(tee.pivot).toBeGreaterThan(tee.top);
+    // 影は片に付け、中の写真には付けない。袖は身ごろより先に (下に) 描く
+    const css = readFileSync("src/style.css", "utf8");
+    expect(/\.wear-piece \{([^}]*)\}/.exec(css)?.[1]).not.toContain("drop-shadow");
+    expect(/\.wear-cut \{([^}]*)\}/.exec(css)?.[1]).toContain("drop-shadow");
+    expect(/\.wear-piece \.wear \{([^}]*)\}/.exec(css)?.[1]).toContain("filter: none");
+    const el = await wearLoaded([item("t1", "top")]);
+    const turns = [...el.querySelectorAll<HTMLElement>('[data-testid="piece"]')].map((p) =>
+      Number(p.dataset.turn),
+    );
+    expect(turns.at(-1)).toBe(0); // 最後 (一番上) は身ごろ
+  });
+
+  test("AC-44-4: 袖の先は台の外に出ない (1280px でも 360px でも、台の % は同じ)", () => {
+    for (const [name, g] of Object.entries(GARMENTS)) {
+      const { left, box } = measured(g);
+      if (left === null) throw new Error(name);
+      const t = sleeveTurn(box, left);
+      const { pivot, tip } = sleevePoints(box, left, t);
+      expect(turnPoint(tip, pivot, t).x, name).toBeGreaterThanOrEqual(EDGE_MARGIN);
+    }
+    // 腕の向きまで回すと台の外に出てしまう長い袖は、出ないところまで内へ戻す
+    const long = { cut: 0.2, top: 0, pivot: 0.05, angle: 0, tip: { x: 0, y: 1.6 } };
+    const box = { top: 10, left: 16, width: 68, height: 70 };
+    const t = sleeveTurn(box, long);
+    expect(t).toBeLessThan(ARM_ANGLE);
+    const { pivot, tip } = sleevePoints(box, long, t);
+    expect(turnPoint(tip, pivot, t).x).toBeGreaterThanOrEqual(EDGE_MARGIN);
   });
 });
 

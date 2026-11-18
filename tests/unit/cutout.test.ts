@@ -4,8 +4,11 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   CACHE_SIZE,
   cutout,
+  cutoutOk,
   cutoutUrl,
+  cutoutWorked,
   forgetCutout,
+  MIN_CLEAR,
   isLocal,
   MIN_KEEP,
   TIGHT_MIN,
@@ -178,5 +181,44 @@ describe("白い服 (#27)", () => {
     expect(cutout(px, 40, 40)).toEqual({ x: 17, y: 17, w: 6, h: 6 });
     expect(MIN_KEEP).toBeGreaterThan(0);
     expect(TIGHT_MIN).toBeLessThan(TOLERANCE);
+  });
+});
+
+describe("切り抜けなかった写真 (#47)", () => {
+  test("AC-47-1: 背景がほとんど残った写真 (白い背景の白い服) は切り抜けなかったと分かり、普通の写真は切り抜けたと分かる", () => {
+    // 白い背景に、ほとんど同じ白の服 (背景との差がわずか): 背景を切り抜けず、ほぼ全部が残る
+    const white = image(40, 40, [4, 4, 32, 32], [252, 252, 252, 255], [250, 250, 250, 255]);
+    cutout(white, 40, 40);
+    expect(cutoutWorked(white, 40, 40)).toBe(false);
+    // 全部が背景と同じ (服が見つからない) も、切り抜けなかった
+    const flat = image(20, 20, [0, 0, 0, 0], [0, 0, 0, 255], [250, 250, 250, 255]);
+    expect(cutout(flat, 20, 20)).toBeNull();
+    expect(
+      cutoutWorked(image(20, 20, [2, 2, 16, 16], [252, 252, 252, 255], [250, 250, 250, 255]), 20, 20),
+    ).toBe(false);
+    // 色のある服: 背景が透明になり、切り抜けた
+    const pink = image(40, 40, [8, 6, 24, 30], [200, 40, 80, 255], [250, 250, 248, 255]);
+    cutout(pink, 40, 40);
+    expect(cutoutWorked(pink, 40, 40)).toBe(true);
+    // 境目: 透明が MIN_CLEAR ちょうどなら切り抜けた
+    const n = 100;
+    const px = new Uint8ClampedArray(n * 4).fill(255);
+    for (let i = 0; i < Math.ceil(n * MIN_CLEAR); i++) px[i * 4 + 3] = 0;
+    expect(cutoutWorked(px, 10, 10)).toBe(true);
+    px[3] = 255;
+    expect(cutoutWorked(px, 10, 10)).toBe(false);
+  });
+
+  test("AC-47-1: 切り抜けない端末では知らせない (切り抜けたとみなす)", async () => {
+    vi.stubGlobal("createImageBitmap", undefined);
+    await expect(cutoutOk("/api/clothes/x/photo")).resolves.toBe(true);
+    vi.unstubAllGlobals();
+  });
+
+  test("AC-47-3: 決めたスタンプは台の右上に置く (下に置くと右のくつ・服に重なる)", () => {
+    const css = readFileSync("src/style.css", "utf8");
+    const stamp = /\n\.stamp \{([^}]*)\}/.exec(css)?.[1] ?? "";
+    expect(stamp).toContain("top: 0;");
+    expect(stamp).not.toMatch(/\bbottom:/);
   });
 });

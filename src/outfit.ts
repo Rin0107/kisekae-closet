@@ -176,27 +176,66 @@ export function dressIn<T extends Item>(items: T[], ids: string[]): T[] {
   return worn;
 }
 
-// ---- 袖を腕に沿わせる・アウターを前開きに (#37 #38) ----
+// ---- 袖を腕に沿わせる・アウターを前開きに (#37 #38 #44) ----
 
 /** 腕の向き (縦から外へ何度)。台の 1% は横と縦で 1:2 なので、横 armSlope % ÷ 縦 1% を px に直す。 */
 export const ARM_ANGLE = (Math.atan((BODY.armSlope * STAGE_RATIO) / 1) * 180) / Math.PI;
 
-/** 写真の袖 (左右の端の BODICE_SHARE の外の帯) の形。px の値は写真の大きさに対する割合。 */
+/** 写真の袖の形。値は写真の大きさに対する割合。 */
 export interface Sleeve {
-  /** 袖の付け根 (身ごろとの境の、袖の一番上) の高さ (写真の高さに対する 0〜1) */
+  /** 袖の帯の幅 (写真の幅に対する 0〜1)。身ごろの外の端より CUT_SAFE だけ外で切り分ける (#44) */
+  cut: number;
+  /** 袖の付け根の一番上 (肩の縫い目) の高さ (写真の高さに対する 0〜1)。内へ回すときの中心 */
+  top: number;
+  /** 袖の付け根の上下の真ん中の高さ (写真の高さに対する 0〜1)。外へ回すときの中心。横はどちらも cut */
   pivot: number;
-  /** 写真の中の袖の向き (縦から外へ何度) */
+  /** 写真の中の袖の向き (付け根の真ん中から袖の重心へ。縦から外へ何度) */
   angle: number;
-  /** 袖の先 (付け根から一番遠いところ)。写真の幅・高さに対する 0〜1 */
+  /** 袖の先 (付け根の真ん中から一番遠いところ)。写真の幅・高さに対する 0〜1 */
   tip: { x: number; y: number };
 }
 
-/** 写真の左右の帯の幅 (写真の幅に対する割合)。袖を除いた身ごろが BODICE_SHARE。 */
+/** 身ごろを測れないときの、写真の左右の帯の幅 (写真の幅に対する割合)。袖を除いた身ごろが BODICE_SHARE。 */
 export const SLEEVE_SHARE = (1 - BODICE_SHARE) / 2;
 
+/** 身ごろの幅を測る行 (写真の高さに対する割合)。袖より下の、裾に近いところ (#44) */
+export const BODICE_ROWS = [0.75, 0.9] as const;
+/** 袖の帯の幅として受け入れる範囲 (写真の幅に対する割合)。外れたら袖がない・測れないとみなす */
+export const CUT_MIN = 0.06;
+export const CUT_MAX = 0.42;
+
 /**
- * 切り抜いた写真の不透明な画素 (opaque(x, y)) から、左の袖の付け根と向きを測る。
- * 付け根は、左の帯の内側の端の一番上の画素。袖の先は、帯の中で付け根から一番遠い画素。
+ * 身ごろの左の端 (画素の列)。裾に近い行 (BODICE_ROWS) で、真ん中から左へ続く不透明な画素の端を測り、一番狭いところ。
+ * 袖は裾まで届かないので、ここより外が袖。固定の割合で切ると、袖のかけらが身ごろの片に残って細い線に見える (評価8)。
+ * 測れない・帯が狭すぎる / 広すぎるなら null。前を開けて撮ったアウターのように真ん中が空いていても、少し外まで探す。
+ */
+export function bodiceEdge(opaque: (x: number, y: number) => boolean, w: number, h: number): number | null {
+  const cx = Math.floor(w / 2);
+  const stop = cx - Math.floor(w * 0.15);
+  let edge = -1;
+  const last = Math.min(h - 1, Math.floor(h * BODICE_ROWS[1]));
+  for (let y = Math.floor(h * BODICE_ROWS[0]); y <= last; y++) {
+    let x = cx;
+    while (x > stop && !opaque(x, y)) x--;
+    if (!opaque(x, y)) continue;
+    while (x > 0 && opaque(x - 1, y)) x--;
+    edge = Math.max(edge, x);
+  }
+  if (edge < 0) return null;
+  const cut = edge / w;
+  return cut < CUT_MIN || cut > CUT_MAX ? null : edge;
+}
+
+/**
+ * 身ごろの端から外へ、これだけ (写真の幅に対する割合) 離して切る。身ごろの縁のにじんだ画素を袖の片に入れない
+ * (入れると、袖と一緒に回って腕に沿った細い線に見える、評価8)。
+ */
+export const CUT_SAFE = 0.02;
+
+/**
+ * 切り抜いた写真の不透明な画素 (opaque(x, y)) から、左の袖の切れ目・付け根・向きを測る。
+ * 切れ目は身ごろの端 (bodiceEdge) の少し外。付け根は切れ目のすぐ外の列の、一番上から続く不透明な画素 (帯の幅まで) の真ん中。
+ * 向きは付け根から袖の帯の画素の重心へ (袖の先の角ではなく袖の軸。広げた T シャツも垂れた長袖も同じに測れる)。
  * 帯の画素がほとんど全部不透明 (切り抜けていない写真) や、ほとんどない (袖なし) なら null (回さない)。
  * 右の袖は写真を左右反転して同じに測る (opaque に反転したものを渡す)。
  */
@@ -205,35 +244,52 @@ export function measureSleeve(
   w: number,
   h: number,
 ): Sleeve | null {
-  const band = Math.max(1, Math.floor(w * SLEEVE_SHARE));
+  const found = bodiceEdge(opaque, w, h);
+  if (found === null) return null;
+  const band = Math.max(1, found - Math.round(w * CUT_SAFE));
   let on = 0;
-  for (let y = 0; y < h; y++) for (let x = 0; x < band; x++) if (opaque(x, y)) on++;
+  let sx = 0;
+  let sy = 0;
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < band; x++)
+      if (opaque(x, y)) {
+        on++;
+        sx += x;
+        sy += y;
+      }
   const share = on / (band * h);
   if (share > 0.9 || share < 0.02) return null;
-  // 付け根: 内側の端 (身ごろとの境) の列で一番上の不透明な画素
   const edge = band - 1;
   let top = -1;
   for (let y = 0; y < h && top < 0; y++) if (opaque(edge, y)) top = y;
   if (top < 0) return null;
+  // 付け根 (袖ぐり) の深さは袖の帯の幅まで。垂れた袖が身ごろに沿って続いていても、付け根を袖の真ん中まで下げない
+  let bottom = top;
+  while (bottom + 1 < h && bottom - top < band && opaque(edge, bottom + 1)) bottom++;
+  const jy = (top + bottom) / 2;
+  const cx = sx / on;
+  const cy = sy / on;
+  if (Math.hypot(edge - cx, cy - jy) < 1) return null;
   let best = 0;
-  let tip = { x: edge, y: top };
-  for (let y = top; y < h; y++)
+  let tip = { x: edge, y: jy };
+  for (let y = 0; y < h; y++)
     for (let x = 0; x < band; x++) {
       if (!opaque(x, y)) continue;
-      const d = (edge - x) ** 2 + (y - top) ** 2;
+      const d = (edge - x) ** 2 + (y - jy) ** 2;
       if (d > best) {
         best = d;
         tip = { x, y };
       }
     }
-  if (best === 0) return null;
-  const angle = (Math.atan2(edge - tip.x, tip.y - top) * 180) / Math.PI;
-  return { pivot: top / h, angle, tip: { x: tip.x / w, y: tip.y / h } };
+  const angle = (Math.atan2(edge - cx, cy - jy) * 180) / Math.PI;
+  return { cut: band / w, top: top / h, pivot: jy / h, angle, tip: { x: tip.x / w, y: tip.y / h } };
 }
 
-/** 袖を回す角度の範囲 (度)。測り違えても、袖が上を向いたり大きく回りすぎたりしない。 */
-export const TURN_MIN = -10;
-export const TURN_MAX = 40;
+/** 袖を回す角度の範囲 (度)。横に広げた袖 (約 80 度) も腕の向きまで下ろせる。測り違えても回りすぎない。 */
+export const TURN_MIN = -70;
+export const TURN_MAX = 45;
+/** 袖の先を台の端からこれだけ内に収める (台の幅の %) */
+export const EDGE_MARGIN = 1;
 
 /** 腕の外の線の x (台の %)。 */
 export function armX(y: number): number {
@@ -250,31 +306,43 @@ export function turnPoint(p: { x: number; y: number }, o: { x: number; y: number
 }
 
 /**
- * 左の袖を、付け根を中心に回して、袖の先が腕の外の線に来る角度 (時計回り = 外へ正)。
+ * 袖を回す中心の高さ (写真の高さに対する 0〜1)。外へ回すなら付け根の真ん中 (袖の軸が腕の付け根を通る)、
+ * 内へ回すなら肩の縫い目 (付け根の上が身ごろから離れず、肩にすき間ができない、#44)。
+ */
+export function sleeveOrigin(s: Sleeve, turn: number): number {
+  return turn > 0 ? s.pivot : s.top;
+}
+
+/** 左の袖を turn 度回すときの、回す中心と袖の先の、台の上の位置 (%)。 */
+export function sleevePoints(
+  box: { top: number; left: number; width: number; height: number },
+  s: Sleeve,
+  turn: number,
+) {
+  return {
+    pivot: { x: box.left + s.cut * box.width, y: box.top + sleeveOrigin(s, turn) * box.height },
+    tip: { x: box.left + s.tip.x * box.width, y: box.top + s.tip.y * box.height },
+  };
+}
+
+/**
+ * 左の袖を回す角度 (中心は sleeveOrigin) (時計回り = 外へ正)。回したあとの袖の向き (付け根→袖の重心) が腕の向き (ARM_ANGLE) にそろう (#44)。
+ * 写真は縦横同じ割合で縮めるので、写真の中の角度は台の上でも同じ。
+ * TURN_MIN〜TURN_MAX に収め、袖の先が台の外に出るなら、出ないところまで内へ戻す (袖の先が台の端で切れない)。
  * box は写真全体の台の上の箱 (左右の真ん中にそろえてあるので、右の袖も反転して同じ箱で求められる)。
- * TURN_MIN〜TURN_MAX の中で探す (測り違えても回りすぎない)。
  */
 export function sleeveTurn(
   box: { top: number; left: number; width: number; height: number },
   s: Sleeve | null,
 ): number {
   if (s === null) return 0;
-  const o = { x: box.left + SLEEVE_SHARE * box.width, y: box.top + s.pivot * box.height };
-  const tip = { x: box.left + s.tip.x * box.width, y: box.top + s.tip.y * box.height };
-  // 先が腕の線の内側なら正 (回すほど外へ出て小さくなる)
-  const f = (deg: number) => {
-    const p = turnPoint(tip, o, deg);
-    return p.x - armX(p.y);
+  let t = Math.min(TURN_MAX, Math.max(TURN_MIN, ARM_ANGLE - s.angle));
+  const out = (deg: number) => {
+    const { pivot, tip } = sleevePoints(box, s, deg);
+    return turnPoint(tip, pivot, deg).x < EDGE_MARGIN;
   };
-  if (f(TURN_MAX) > 0) return TURN_MAX;
-  if (f(TURN_MIN) < 0) return TURN_MIN;
-  let [lo, hi] = [TURN_MIN, TURN_MAX];
-  for (let i = 0; i < 30; i++) {
-    const mid = (lo + hi) / 2;
-    if (f(mid) > 0) lo = mid;
-    else hi = mid;
-  }
-  return (lo + hi) / 2;
+  while (t > TURN_MIN && out(t)) t = Math.max(TURN_MIN, t - 1);
+  return t;
 }
 
 /** アウターの前を開ける幅 (台の幅に対する %)。 */
@@ -294,6 +362,7 @@ export interface Piece {
 
 /**
  * 袖のある服 (トップス・アウター) を、左の袖・身ごろ・右の袖 (アウターで前を開けるなら身ごろを左右 2 つ) に切り分けて置く。
+ * 切れ目は測った身ごろの端 (測れなければ SLEEVE_SHARE)。
  * box は写真全体の箱 (place の結果、height は写真の縦横比から決めたもの)。写真は曲げない: 片は切り分けて、動かす・回すだけ。
  * left・right は左右の袖の測った形 (右は反転して測ったもの)。
  */
@@ -303,7 +372,8 @@ export function pieces(
   right: Sleeve | null,
   open: boolean,
 ): Piece[] {
-  const s = SLEEVE_SHARE;
+  const lc = left?.cut ?? SLEEVE_SHARE;
+  const rc = 1 - (right?.cut ?? SLEEVE_SHARE);
   const shift = open ? OPEN_GAP / 2 : 0;
   const at = (from: number, to: number, dx: number) => ({
     top: box.top,
@@ -314,26 +384,17 @@ export function pieces(
   const flat = { x: 50, y: 0 };
   const body: Piece[] = open
     ? [
-        { from: s, to: 0.5, box: at(s, 0.5, -shift), turn: 0, origin: flat },
-        { from: 0.5, to: 1 - s, box: at(0.5, 1 - s, shift), turn: 0, origin: flat },
+        { from: lc, to: 0.5, box: at(lc, 0.5, -shift), turn: 0, origin: flat },
+        { from: 0.5, to: rc, box: at(0.5, rc, shift), turn: 0, origin: flat },
       ]
-    : [{ from: s, to: 1 - s, box: at(s, 1 - s, 0), turn: 0, origin: flat }];
+    : [{ from: lc, to: rc, box: at(lc, rc, 0), turn: 0, origin: flat }];
+  const lt = sleeveTurn(box, left);
+  const rt = sleeveTurn(box, right);
+  const oy = (s: Sleeve | null, t: number) => (s === null ? 0 : sleeveOrigin(s, t) * 100);
   return [
     // 左の袖は付け根 (右の端) を中心に時計回り (外へ)、右の袖は反時計回り
-    {
-      from: 0,
-      to: s,
-      box: at(0, s, -shift),
-      turn: sleeveTurn(box, left),
-      origin: { x: 100, y: (left?.pivot ?? 0) * 100 },
-    },
+    { from: 0, to: lc, box: at(0, lc, -shift), turn: lt, origin: { x: 100, y: oy(left, lt) } },
     ...body,
-    {
-      from: 1 - s,
-      to: 1,
-      box: at(1 - s, 1, shift),
-      turn: -sleeveTurn(box, right),
-      origin: { x: 0, y: (right?.pivot ?? 0) * 100 },
-    },
+    { from: rc, to: 1, box: at(rc, 1, shift), turn: -rt, origin: { x: 0, y: oy(right, rt) } },
   ];
 }

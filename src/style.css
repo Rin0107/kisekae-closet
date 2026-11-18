@@ -239,10 +239,11 @@ input {
     transform: scale(0.6) rotate(60deg);
   }
 }
+/* 決めたスタンプは台の右上 (頭の横の空いたところ)。下だとくつ・服に重なる (#47) */
 .stamp {
   position: absolute;
-  bottom: var(--sp-4);
-  right: calc(50% - var(--stage-w) / 2 - var(--sp-2));
+  top: 0;
+  right: calc(50% - var(--stage-w) / 2 - var(--sp-4));
   transform: rotate(-12deg);
   padding: var(--sp-1) var(--sp-2);
   border: 3px solid var(--c-primary-strong);
@@ -626,8 +627,19 @@ input {
   overflow: hidden;
   pointer-events: none;
 }
+/*
+ * 切り分けた服 1 枚分の入れ物。影はここに付ける: 中の写真に付けると身ごろの縁の影が袖の片に入って袖と一緒に回り (#44)、
+ * 片ごとに付けると継ぎ目に縦の線が出る (#47)
+ */
+.wear-cut {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  filter: drop-shadow(0 2px 3px rgb(0 0 0 / 0.18));
+}
 .wear-piece .wear {
   max-width: none;
+  filter: none;
 }
 .wear-foot .wear-shoes {
   max-width: none;
@@ -753,4 +765,25 @@ input {
   .dresser-side .closet {
     margin-top: var(--sp-2);
   }
+}
+
+/* 天気が読めたら保存する、決めたコーデのスタンプ (#46)。保存したものより淡く */
+.day-stamp.held {
+  opacity: 0.55;
+}
+
+/* 切り抜けなかった写真の知らせ (#47) */
+.cut-bad {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-s);
+  background: var(--c-surface);
+  border: 1px solid var(--c-primary-strong);
+}
+.cut-bad p {
+  margin: 0;
+  flex: 1 1 14em;
 }
