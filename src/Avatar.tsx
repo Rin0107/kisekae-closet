@@ -3,7 +3,7 @@
 // 顔写真は使わない。体は回さない (idea.md の「デザイン」)。服の袖は切り分けて腕の向きに置く (#37)。
 import { forwardRef, useState, type SyntheticEvent } from "react";
 import { api, type Clothing } from "./client";
-import { measureSleeve, pieces, place, shoeFeet, SLOTS, STAGE_RATIO, type Box, type Sleeve } from "./outfit";
+import { measureSleeve, pieceTransform, pieces, place, shoeFeet, SLOTS, STAGE_RATIO, type Box, type Sleeve } from "./outfit";
 import { Photo } from "./Photo";
 
 /**
@@ -94,7 +94,7 @@ function Worn({ item: c, open = false }: { item: Clothing; open?: boolean }) {
             style={{
               ...boxStyle(p.box),
               zIndex: SLOTS[c.kind]?.z,
-              transform: p.turn === 0 ? undefined : `rotate(${p.turn}deg)`,
+              transform: pieceTransform(p),
               transformOrigin: `${p.origin.x}% ${p.origin.y}%`,
             }}
           >
