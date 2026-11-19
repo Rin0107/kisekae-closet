@@ -17,6 +17,7 @@
 | `outfit_items` | コーデに入った服                                                                                          | 同上                                                                                 |
 
 - 写真は端末で縮小・再エンコードし、撮った場所などの情報 (Exif・XMP) を消してから送る。サーバーでも残っていれば受け取らない (`src/worker/photo.ts`)
+- 端末で送る前に Exif・XMP・IPTC を落とす (iPhone の Safari の JPEG は canvas から書いても Exif が付くため。src/shrink.ts の stripMetadata)
 - 写真は本人にだけ返し、キャッシュさせない (`Cache-Control: private, no-store`)
 - 「アカウントと全データを消す」で、上の行は全部消える
 - 「データを書き出す」で、自分の服 (写真つき) とコーデを JSON で取り出せる
