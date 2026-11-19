@@ -112,7 +112,7 @@ describe("袖を腕の向きに (#37)", () => {
     expect(ps).toHaveLength(3);
     for (const p of ps) {
       // 片の回し方は rotate だけ (skew・片方だけの拡大を使わない)
-      expect(p.style.transform).toMatch(/^(rotate\(-?[\d.e-]+deg\))?$/);
+      expect(p.style.transform).toMatch(/^(rotate\(-?[\d.e-]+deg\)( scale\([\d.]+\))?)?$/);
       const img = p.querySelector("img") as HTMLImageElement;
       expect(img.style.transform).toBe("");
       expect(img.style.height).toBe("100%");
@@ -349,7 +349,7 @@ describe("アウターを前開きに (#38)", () => {
     expect(ps[2]?.turn).toBe(0);
     const el = await wearLoaded([item("t1", "top"), item("o1", "outer")]);
     for (const p of el.querySelectorAll<HTMLElement>('[data-testid="piece"]')) {
-      expect(p.style.transform).toMatch(/^(rotate\(-?[\d.e-]+deg\))?$/);
+      expect(p.style.transform).toMatch(/^(rotate\(-?[\d.e-]+deg\)( scale\([\d.]+\))?)?$/);
       expect((p.querySelector("img") as HTMLImageElement).style.transform).toBe("");
     }
   });

@@ -345,6 +345,42 @@ export function sleeveTurn(
   return t;
 }
 
+/** 袖を小さくして収めるときの下限 (これより小さくしない。腕より細い袖にしない)。 */
+export const SCALE_MIN = 0.7;
+
+/**
+ * 左の袖を回す角度と大きさ。角度は腕のまま (ARM_ANGLE にそろえる)、袖の先が台の外に出るなら、
+ * 付け根を中心に縦横同じ割合で小さくして収める (SCALE_MIN まで。写真は曲げない)。
+ * 小さくしても出るときだけ、sleeveTurn と同じに角度を内へ戻す。
+ */
+export function sleeveFit(
+  box: { top: number; left: number; width: number; height: number },
+  s: Sleeve | null,
+): { turn: number; scale: number } {
+  if (s === null) return { turn: 0, scale: 1 };
+  const want = Math.min(TURN_MAX, Math.max(TURN_MIN, ARM_ANGLE - s.angle));
+  const outAt = (deg: number, k: number) => {
+    const { pivot, tip } = sleevePoints(box, s, deg);
+    const scaled = { x: pivot.x + (tip.x - pivot.x) * k, y: pivot.y + (tip.y - pivot.y) * k };
+    return turnPoint(scaled, pivot, deg).x < EDGE_MARGIN;
+  };
+  const steps = Math.round((1 - SCALE_MIN) * 100);
+  for (let i = 0; i <= steps; i++) {
+    const k = i === steps ? SCALE_MIN : 1 - i / 100;
+    if (!outAt(want, k)) return { turn: want, scale: k };
+  }
+  let t = want;
+  while (t > TURN_MIN && outAt(t, SCALE_MIN)) t = Math.max(TURN_MIN, t - 1);
+  return { turn: t, scale: SCALE_MIN };
+}
+
+/** 片の動かし方 (CSS の transform)。rotate と、縦横同じ scale だけ。 */
+export function pieceTransform(p: Piece): string | undefined {
+  if (p.turn === 0 && p.scale === 1) return undefined;
+  if (p.scale === 1) return `rotate(${p.turn}deg)`;
+  return `rotate(${p.turn}deg) scale(${p.scale})`;
+}
+
 /** アウターの前を開ける幅 (台の幅に対する %)。 */
 export const OPEN_GAP = 8;
 
@@ -357,6 +393,8 @@ export interface Piece {
   box: { top: number; left: number; width: number; height: number };
   /** 回す角度 (度、時計回りが正) と、回す中心 (片の箱に対する %) */
   turn: number;
+  /** 付け根を中心に縦横同じ割合で小さくする (1 = そのまま) */
+  scale: number;
   origin: { x: number; y: number };
 }
 
@@ -384,17 +422,19 @@ export function pieces(
   const flat = { x: 50, y: 0 };
   const body: Piece[] = open
     ? [
-        { from: lc, to: 0.5, box: at(lc, 0.5, -shift), turn: 0, origin: flat },
-        { from: 0.5, to: rc, box: at(0.5, rc, shift), turn: 0, origin: flat },
+        { from: lc, to: 0.5, box: at(lc, 0.5, -shift), turn: 0, scale: 1, origin: flat },
+        { from: 0.5, to: rc, box: at(0.5, rc, shift), turn: 0, scale: 1, origin: flat },
       ]
-    : [{ from: lc, to: rc, box: at(lc, rc, 0), turn: 0, origin: flat }];
-  const lt = sleeveTurn(box, left);
-  const rt = sleeveTurn(box, right);
+    : [{ from: lc, to: rc, box: at(lc, rc, 0), turn: 0, scale: 1, origin: flat }];
+  const lf = sleeveFit(box, left);
+  const rf = sleeveFit(box, right);
+  const lt = lf.turn;
+  const rt = rf.turn;
   const oy = (s: Sleeve | null, t: number) => (s === null ? 0 : sleeveOrigin(s, t) * 100);
   return [
     // 左の袖は付け根 (右の端) を中心に時計回り (外へ)、右の袖は反時計回り
-    { from: 0, to: lc, box: at(0, lc, -shift), turn: lt, origin: { x: 100, y: oy(left, lt) } },
+    { from: 0, to: lc, box: at(0, lc, -shift), turn: lt, scale: lf.scale, origin: { x: 100, y: oy(left, lt) } },
     ...body,
-    { from: rc, to: 1, box: at(rc, 1, shift), turn: -rt, origin: { x: 0, y: oy(right, rt) } },
+    { from: rc, to: 1, box: at(rc, 1, shift), turn: -rt, scale: rf.scale, origin: { x: 0, y: oy(right, rt) } },
   ];
 }
