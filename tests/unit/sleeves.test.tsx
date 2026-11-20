@@ -236,7 +236,7 @@ const measured = (g: { w: number; h: number; shapes: readonly (readonly (readonl
 };
 
 describe("袖を腕と同じ角度に (#44)", () => {
-  test("AC-44-1: 長袖・アウター・T シャツの袖の向き (付け根から袖の重心) が、回したあとアバターの腕の向きと 10° 以内", () => {
+  test("AC-44-1: 長袖・アウター・T シャツの袖の向き (袖の帯の画素の主軸) が、回したあとアバターの腕の向きと 10° 以内", () => {
     for (const [name, g] of Object.entries(GARMENTS)) {
       const { left, right, box } = measured(g);
       expect(left, name).not.toBeNull();

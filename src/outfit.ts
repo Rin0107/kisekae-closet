@@ -189,7 +189,7 @@ export interface Sleeve {
   top: number;
   /** 袖の付け根の上下の真ん中の高さ (写真の高さに対する 0〜1)。外へ回すときの中心。横はどちらも cut */
   pivot: number;
-  /** 写真の中の袖の向き (付け根の真ん中から袖の重心へ。縦から外へ何度) */
+  /** 写真の中の袖の向き (袖の帯の画素の主軸を、付け根から袖の先へ向けたもの。縦から外へ何度) */
   angle: number;
   /** 袖の先 (付け根の真ん中から一番遠いところ)。写真の幅・高さに対する 0〜1 */
   tip: { x: number; y: number };
@@ -235,7 +235,7 @@ export const CUT_SAFE = 0.02;
 /**
  * 切り抜いた写真の不透明な画素 (opaque(x, y)) から、左の袖の切れ目・付け根・向きを測る。
  * 切れ目は身ごろの端 (bodiceEdge) の少し外。付け根は切れ目のすぐ外の列の、一番上から続く不透明な画素 (帯の幅まで) の真ん中。
- * 向きは付け根から袖の帯の画素の重心へ (袖の先の角ではなく袖の軸。広げた T シャツも垂れた長袖も同じに測れる)。
+ * 向きは袖の帯の画素の主軸 (付け根から袖の先へ向けたもの。袖の先の角ではなく袖の軸。広げた T シャツも垂れた長袖も同じに測れる)。
  * 帯の画素がほとんど全部不透明 (切り抜けていない写真) や、ほとんどない (袖なし) なら null (回さない)。
  * 右の袖は写真を左右反転して同じに測る (opaque に反転したものを渡す)。
  */
@@ -281,7 +281,25 @@ export function measureSleeve(
         tip = { x, y };
       }
     }
-  const angle = (Math.atan2(edge - cx, cy - jy) * 180) / Math.PI;
+  // 向きは袖の帯の画素の主軸 (付け根から袖の先へ向けたもの)
+  let xx = 0;
+  let yy = 0;
+  let xy = 0;
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < band; x++)
+      if (opaque(x, y)) {
+        xx += (x - cx) ** 2;
+        yy += (y - cy) ** 2;
+        xy += (x - cx) * (y - cy);
+      }
+  const th = 0.5 * Math.atan2(2 * xy, xx - yy);
+  let ax = Math.cos(th);
+  let ay = Math.sin(th);
+  if (ax * (cx - edge) + ay * (cy - jy) < 0) {
+    ax = -ax;
+    ay = -ay;
+  }
+  const angle = (Math.atan2(-ax, ay) * 180) / Math.PI;
   return { cut: band / w, top: top / h, pivot: jy / h, angle, tip: { x: tip.x / w, y: tip.y / h } };
 }
 
