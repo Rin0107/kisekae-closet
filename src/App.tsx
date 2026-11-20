@@ -753,7 +753,7 @@ function ClosetRoom({
   onChange: () => void;
   onError: (e: unknown) => void;
 }) {
-  const [kind, setKind] = useState<string | null>(null);
+  const [kind, setKind] = useState<string>("top");
   const [warmth, setWarmth] = useState(3);
   const [label, setLabel] = useState("");
   const [file, setFile] = useState<File | null>(null);
@@ -792,7 +792,6 @@ function ClosetRoom({
     if (photo === null) return setNote("写真を小さくできない");
     await api.addClothing({ kind: k, warmth, label, photo });
     setShelf(shelfOf(k));
-    setKind(null);
     setLabel("");
     setFile(null);
     setPicker((n) => n + 1);
@@ -810,77 +809,73 @@ function ClosetRoom({
           </button>
         ))}
       </div>
-      {kind === null ? (
-        <p className="muted">まず、しまう服の種類を選んでください。</p>
-      ) : (
-        <div className="register" data-testid="register">
-          <div className="frame" data-testid="frame" data-kind={kind}>
-            {preview && <Photo src={preview} alt="選んだ写真" />}
-            <svg viewBox="0 0 120 120" aria-hidden="true">
-              <path d={FRAMES[kind]} />
-            </svg>
-          </div>
-          <p className="guide" data-testid="guide">
-            ハンガーにかけて、正面からまっすぐ撮ってください。服が枠に収まるように (顔や部屋は写さない)。
-            <span data-testid="guide-bg">背景は服と違う色に (白い服なら色のある壁や布の前で)。</span>
-          </p>
-          <label className="file">
-            <span className="file-title">写真を撮る・選ぶ</span>
-            <input
-              key={picker}
-              type="file"
-              accept="image/*"
-              capture="environment"
-              aria-label="写真"
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-            />
-          </label>
-          {preview && badCut === preview && (
-            <div className="cut-bad" role="status" data-testid="cut-bad">
-              <p>
-                背景と服の色が近くて、切り抜けませんでした。このままだと写真の四角ごとアバターに重なります。色のちがう壁や布の前で撮ってください。
-              </p>
-              <button
-                type="button"
-                className="ghost"
-                onClick={() => {
-                  setFile(null);
-                  setPicker((n) => n + 1);
-                }}
-              >
-                撮り直す
-              </button>
-            </div>
-          )}
-          <div className="warmth" role="group" aria-label="暖かさ">
-            <span>暖かさ</span>
-            {[1, 2, 3, 4, 5].map((n) => (
-              <button
-                key={n}
-                type="button"
-                aria-pressed={warmth === n}
-                aria-label={`暖かさ ${n}`}
-                onClick={() => setWarmth(n)}
-              >
-                {"●".repeat(n)}
-              </button>
-            ))}
-          </div>
-          <label className="field">
-            ラベル (例: 通勤・お気に入り)
-            <input
-              value={label}
-              maxLength={40}
-              onChange={(e) => setLabel(e.target.value)}
-              aria-label="ラベル"
-            />
-          </label>
-          <button type="button" className="primary" onClick={() => add(kind).catch(onError)}>
-            クローゼットにしまう
-          </button>
-          {note && <p role="alert">{note}</p>}
+      <div className="register" data-testid="register">
+        <div className="frame" data-testid="frame" data-kind={kind}>
+          {preview && <Photo src={preview} alt="選んだ写真" />}
+          <svg viewBox="0 0 120 120" aria-hidden="true">
+            <path d={FRAMES[kind]} />
+          </svg>
         </div>
-      )}
+        <p className="guide" data-testid="guide">
+          ハンガーにかけて、正面からまっすぐ撮ってください。服が枠に収まるように (顔や部屋は写さない)。
+          <span data-testid="guide-bg">背景は服と違う色に (白い服なら色のある壁や布の前で)。</span>
+        </p>
+        <label className="file">
+          <span className="file-title">写真を撮る・選ぶ</span>
+          <input
+            key={picker}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            aria-label="写真"
+            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+          />
+        </label>
+        {preview && badCut === preview && (
+          <div className="cut-bad" role="status" data-testid="cut-bad">
+            <p>
+              背景と服の色が近くて、切り抜けませんでした。このままだと写真の四角ごとアバターに重なります。色のちがう壁や布の前で撮ってください。
+            </p>
+            <button
+              type="button"
+              className="ghost"
+              onClick={() => {
+                setFile(null);
+                setPicker((n) => n + 1);
+              }}
+            >
+              撮り直す
+            </button>
+          </div>
+        )}
+        <div className="warmth" role="group" aria-label="暖かさ">
+          <span>暖かさ</span>
+          {[1, 2, 3, 4, 5].map((n) => (
+            <button
+              key={n}
+              type="button"
+              aria-pressed={warmth === n}
+              aria-label={`暖かさ ${n}`}
+              onClick={() => setWarmth(n)}
+            >
+              {"●".repeat(n)}
+            </button>
+          ))}
+        </div>
+        <label className="field">
+          ラベル (例: 通勤・お気に入り)
+          <input
+            value={label}
+            maxLength={40}
+            onChange={(e) => setLabel(e.target.value)}
+            aria-label="ラベル"
+          />
+        </label>
+        <button type="button" className="primary" onClick={() => add(kind).catch(onError)}>
+          クローゼットにしまう
+        </button>
+        {note && <p role="alert">{note}</p>}
+      </div>
       <h2>クローゼット ({clothes.length})</h2>
       <div role="tablist" aria-label="服の種類" className="shelves">
         {SHELVES.map((s) => (

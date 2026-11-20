@@ -546,14 +546,14 @@ describe("服をしまう", () => {
     await act(async () => input.dispatchEvent(new Event("change", { bubbles: true })));
   };
 
-  test("AC-2-4: 種類を選ぶと枠と撮り方が出て、暖かさとラベルを付けてしまうと、その棚に並ぶ", async () => {
+  test("AC-2-4: 最初からトップスの枠と撮り方が出ていて、種類を選ぶと枠が変わり、暖かさとラベルを付けてしまうと、その棚に並ぶ", async () => {
     vi.stubGlobal(
       "URL",
       Object.assign(URL, { createObjectURL: vi.fn(() => "blob:x"), revokeObjectURL: vi.fn() }),
     );
     const el = await render();
     await click(button(el, "クローゼット"));
-    expect(el.querySelector('[data-testid="frame"]')).toBeNull();
+    expect(el.querySelector('[data-testid="frame"]')?.getAttribute("data-kind")).toBe("top");
     await click(button(el, "アウター"));
     expect(el.querySelector('[data-testid="frame"]')?.getAttribute("data-kind")).toBe("outer");
     expect(el.querySelector('[data-testid="guide"]')?.textContent).toContain(
@@ -589,7 +589,7 @@ describe("服をしまう", () => {
     const shelf = el.querySelector('[data-testid="shelf"]') as HTMLElement;
     expect(shelf.dataset.shelf).toBe("outer");
     expect(shelf.textContent).toContain("通勤");
-    expect(el.querySelector('[data-testid="frame"]')).toBeNull();
+    expect(el.querySelector('[data-testid="frame"]')?.getAttribute("data-kind")).toBe("outer");
     await click(button(el, "ワンピース"));
     await pickFile(el, null);
     await click(button(el, "クローゼットにしまう"));
