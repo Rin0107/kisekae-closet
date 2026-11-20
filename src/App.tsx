@@ -410,6 +410,7 @@ function Home({ first, onOut }: { first: FirstForecast | null; onOut: () => void
           </section>
         )}
         {tab === "closet" && <ClosetRoom clothes={clothes} onChange={reload} onError={fail} />}
+        {tab === "closet" && <Settings onOut={onOut} />}
         {tab === "calendar" && (
           <CalendarRoom
             clothes={clothes}
@@ -430,8 +431,54 @@ function Home({ first, onOut }: { first: FirstForecast | null; onOut: () => void
           />
         )}
         {error && <p role="alert">{error}</p>}
-        {tab === "closet" && <ThemePicker />}
-        {tab === "closet" && (
+      </main>
+      <nav className="tabbar" aria-label="画面">
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            aria-current={tab === t.id ? "page" : undefined}
+            onClick={() => setTab(t.id)}
+          >
+            {t.name}
+          </button>
+        ))}
+      </nav>
+    </div>
+  );
+}
+
+/** テーマ・書き出し・ログアウト・アカウントの削除は、「設定」を押したときだけ開く。 */
+function Settings({ onOut }: { onOut: () => void }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button
+        type="button"
+        className="ghost settings-toggle"
+        aria-expanded={open}
+        aria-controls="settings-panel"
+        onClick={() => setOpen((o) => !o)}
+      >
+        <svg
+          viewBox="0 0 24 24"
+          width="18"
+          height="18"
+          aria-hidden="true"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <circle cx="12" cy="12" r="3" />
+          <path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1" />
+        </svg>
+        設定
+      </button>
+      {open && (
+        <div id="settings-panel" className="settings-panel">
+          <ThemePicker />
           <footer className="account">
             <a href="/api/export" download="closet.json">
               データを書き出す
@@ -455,21 +502,9 @@ function Home({ first, onOut }: { first: FirstForecast | null; onOut: () => void
               アカウントと全データを消す
             </button>
           </footer>
-        )}
-      </main>
-      <nav className="tabbar" aria-label="画面">
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            aria-current={tab === t.id ? "page" : undefined}
-            onClick={() => setTab(t.id)}
-          >
-            {t.name}
-          </button>
-        ))}
-      </nav>
-    </div>
+        </div>
+      )}
+    </>
   );
 }
 

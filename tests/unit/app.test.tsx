@@ -166,6 +166,7 @@ const tab = (root: HTMLElement, text: string) =>
   [...root.querySelectorAll('[role="tab"], nav button')].find((b) => b.textContent === text);
 const account = async (el: HTMLElement, text: string) => {
   await click(button(el, "クローゼット"));
+  await click(button(el, "設定"));
   return button(el, text);
 };
 const worn = (root: HTMLElement) =>
@@ -1024,6 +1025,7 @@ describe("テーマ (#8)", () => {
     const root = document.documentElement;
     expect(root.dataset.theme).toBe("strawberry");
     await click(button(el, "クローゼット"));
+    await click(button(el, "設定"));
     const group = el.querySelector('[aria-label="テーマの色"]') as HTMLElement;
     expect([...group.querySelectorAll("button")].map((b) => b.textContent)).toEqual([
       "いちごミルク",
