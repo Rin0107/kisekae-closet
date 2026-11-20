@@ -166,7 +166,7 @@ const tab = (root: HTMLElement, text: string) =>
   [...root.querySelectorAll('[role="tab"], nav button')].find((b) => b.textContent === text);
 const account = async (el: HTMLElement, text: string) => {
   await click(button(el, "クローゼット"));
-  await click(button(el, "設定"));
+  if (button(el, "設定")?.getAttribute("aria-expanded") !== "true") await click(button(el, "設定"));
   return button(el, text);
 };
 const worn = (root: HTMLElement) =>
@@ -708,6 +708,7 @@ describe("天気を 2 秒以内に出す (#21)", () => {
     await act(async () => {});
     expect(localStorage.getItem("kisekae-closet:forecast")).not.toBeNull();
     await click(el.querySelector('nav[aria-label="画面"] button:nth-child(2)'));
+    await click(button(el, "設定"));
     await click(button(el, "ログアウト"));
     expect(button(el, "はじめる")).toBeDefined();
     expect(localStorage.getItem("kisekae-closet:forecast")).toBeNull();
@@ -1107,6 +1108,8 @@ describe("アカウント", () => {
     const el = await render();
     expect(el.querySelector("a")).toBeNull(); // 今日の画面には出さない
     await click(button(el, "クローゼット"));
+    expect(el.querySelector("a")).toBeNull(); // 設定を開くまで出さない
+    await click(button(el, "設定"));
     expect(el.querySelector("a")?.getAttribute("href")).toBe("/api/export");
     expect(Object.keys(KIND_NAMES)).toEqual(["top", "bottom", "outer", "dress", "shoes", "accessory"]);
     expect(shelfOf("dress")).toBe("dress");
@@ -1299,6 +1302,7 @@ describe("細かい見た目と後始末 (#29)", () => {
     expect(Object.keys(localStorage).filter((k) => k.startsWith("kisekae-closet:"))).toContain(
       "kisekae-closet:city",
     );
+    await click(button(el, "設定"));
     await click(button(el, "アカウントと全データを消す"));
     expect(calls).toContain("DELETE account");
     expect(Object.keys(localStorage).filter((k) => k.startsWith("kisekae-closet:"))).toEqual([]);
