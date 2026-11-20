@@ -124,8 +124,8 @@ export function cutoutWorked(px: Uint8ClampedArray, w: number, h: number): boole
   return clear >= n * MIN_CLEAR;
 }
 
-/** 切り抜く前に縮める大きさ (長辺)。 */
-export const CUT_SIDE = 512;
+/** 切り抜く前に縮める大きさ (長辺)。送る写真と同じ細かさ (iPhone の画素 3 倍の枠でも粗くしない)。 */
+export const CUT_SIDE = 1024; // shrink.ts の MAX_SIDE と同じ (import すると、shrink をモックするテストで読めない)
 
 /** 端末の中の写真 (選んだばかりの写真の下見)。 */
 export const isLocal = (src: string) => src.startsWith("blob:") || src.startsWith("data:");
@@ -171,6 +171,8 @@ async function render(src: string): Promise<Cut> {
     d.done();
     return plain;
   }
+  g.imageSmoothingEnabled = true;
+  g.imageSmoothingQuality = "high";
   g.drawImage(img, 0, 0, w, h);
   d.done();
   const data = g.getImageData(0, 0, w, h);
