@@ -1,7 +1,6 @@
 // 服の写真の切り抜き (端末の中だけ。サーバーには元の写真だけがある)。
 // 写真の四辺につながった「背景の色」の画素を透明にし、服のところだけに切り詰める。
 // 表示するときに 1 回だけ計算し、blob: の URL にしておく (同じ写真は使い回す)。
-import { MAX_SIDE } from "./shrink";
 
 export interface Box {
   x: number;
@@ -126,7 +125,7 @@ export function cutoutWorked(px: Uint8ClampedArray, w: number, h: number): boole
 }
 
 /** 切り抜く前に縮める大きさ (長辺)。送る写真と同じ細かさ (iPhone の画素 3 倍の枠でも粗くしない)。 */
-export const CUT_SIDE = MAX_SIDE;
+export const CUT_SIDE = 1024; // shrink.ts の MAX_SIDE と同じ (import すると、shrink をモックするテストで読めない)
 
 /** 端末の中の写真 (選んだばかりの写真の下見)。 */
 export const isLocal = (src: string) => src.startsWith("blob:") || src.startsWith("data:");
