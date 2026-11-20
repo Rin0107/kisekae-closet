@@ -842,7 +842,8 @@ function ClosetRoom({
       await api.addClothing({ kind: k, warmth, label, photo });
     } catch (e) {
       // サーバーの理由 (Exif など) は出さない。ログイン切れ (401) と 500 などは今までどおり投げる
-      if (e instanceof ApiError && e.status !== 401 && e.status >= 400 && e.status < 500) return setNote(failed);
+      if (e instanceof ApiError && e.status !== 401 && e.status >= 400 && e.status < 500)
+        return setNote(failed);
       throw e;
     }
     setShelf(shelfOf(k));
