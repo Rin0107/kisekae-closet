@@ -239,7 +239,8 @@ describe("ログインのあと: 今日の画面", () => {
     await click(el.querySelector('[aria-label="コートを着る"]'));
     expect(g().dataset.band).toBe("hot");
     expect(g().textContent).toContain("暑い");
-    expect(g().textContent).not.toMatch(/\d/);
+    // 暖かさの数字は出さない (一言の「1枚」は服の枚数なので除く)
+    expect((g().textContent ?? "").replace(/\d枚/g, "")).not.toMatch(/\d/);
     expect(parseFloat(left())).toBeGreaterThan(parseFloat(before));
   });
 
