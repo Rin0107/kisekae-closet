@@ -396,6 +396,47 @@ input {
   height: 88px;
   object-fit: contain;
 }
+/* 今日の画面: スマホの幅でも台 (左) と棚 (右) の 2 列。棚は台の高さの中で縦に流す (Rin0107/kisekae-closet-archive#50) */
+.dresser {
+  display: grid;
+  grid-template-columns: var(--stage-w) minmax(0, 1fr);
+  gap: var(--sp-2);
+  align-items: start;
+}
+.dresser-side {
+  grid-column: 1 / -1;
+}
+.dresser .stage-wrap {
+  margin: 0;
+}
+.dresser > .closet {
+  margin-top: 0;
+  max-height: var(--stage-h);
+  overflow-y: auto;
+  min-width: 0;
+}
+.dresser > .closet .rack {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-1);
+  overflow: visible;
+}
+.dresser > .closet .shelves {
+  display: flex;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  gap: var(--sp-1);
+}
+.dresser > .closet .garment {
+  width: 100%;
+  padding: var(--sp-1);
+}
+.dresser > .closet .garment img {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1;
+  object-fit: contain;
+}
 .garment-label {
   max-width: 100%;
   overflow: hidden;
@@ -758,12 +799,6 @@ input {
     grid-template-columns: var(--stage-w) minmax(0, 1fr);
     gap: var(--sp-4);
     align-items: start;
-  }
-  .dresser .stage-wrap {
-    margin: 0;
-  }
-  .dresser-side .closet {
-    margin-top: var(--sp-2);
   }
 }
 

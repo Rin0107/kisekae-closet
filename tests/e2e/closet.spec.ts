@@ -333,10 +333,10 @@ test("AC-7-5 AC-9-2 AC-22-3 AC-25-1 AC-25-2 AC-27-3 AC-28-1 AC-28-2 AC-29-2 AC-3
       b.y + b.height <= stampBox.y;
     expect(apart, JSON.stringify({ stamp: stampBox, other: b })).toBe(true);
   }
-  // AC-40-2: 幅 360px では棚は台の下
-  const rackTop = await page.getByTestId("rack").boundingBox();
+  // AC-40-2: 幅 360px でも棚は台の右 (台と棚が 1 画面に並ぶ)
+  const rackBox = await page.getByTestId("rack").boundingBox();
   const narrow = await stage.boundingBox();
-  expect(rackTop?.y ?? 0).toBeGreaterThanOrEqual((narrow?.y ?? 0) + (narrow?.height ?? 0));
+  expect(rackBox?.x ?? 0).toBeGreaterThanOrEqual((narrow?.x ?? 0) + (narrow?.width ?? 0));
   // AC-41-1: 服をしまう画面の見出し『写真を撮る・選ぶ』は 1 行
   await page.getByRole("navigation", { name: "画面" }).getByRole("button", { name: "クローゼット" }).click();
   await page.getByRole("group", { name: "種類" }).getByRole("button", { name: "トップス" }).click();
