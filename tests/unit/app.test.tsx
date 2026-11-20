@@ -166,6 +166,7 @@ const tab = (root: HTMLElement, text: string) =>
   [...root.querySelectorAll('[role="tab"], nav button')].find((b) => b.textContent === text);
 const account = async (el: HTMLElement, text: string) => {
   await click(button(el, "クローゼット"));
+  if (button(el, "設定")?.getAttribute("aria-expanded") !== "true") await click(button(el, "設定"));
   return button(el, text);
 };
 const worn = (root: HTMLElement) =>
@@ -238,7 +239,8 @@ describe("ログインのあと: 今日の画面", () => {
     await click(el.querySelector('[aria-label="コートを着る"]'));
     expect(g().dataset.band).toBe("hot");
     expect(g().textContent).toContain("暑い");
-    expect(g().textContent).not.toMatch(/\d/);
+    // 暖かさの数字は出さない (一言の「1枚」は服の枚数なので除く)
+    expect((g().textContent ?? "").replace(/\d枚/g, "")).not.toMatch(/\d/);
     expect(parseFloat(left())).toBeGreaterThan(parseFloat(before));
   });
 
@@ -546,14 +548,14 @@ describe("服をしまう", () => {
     await act(async () => input.dispatchEvent(new Event("change", { bubbles: true })));
   };
 
-  test("AC-2-4: 種類を選ぶと枠と撮り方が出て、暖かさとラベルを付けてしまうと、その棚に並ぶ", async () => {
+  test("AC-2-4: 最初からトップスの枠と撮り方が出ていて、種類を選ぶと枠が変わり、暖かさとラベルを付けてしまうと、その棚に並ぶ", async () => {
     vi.stubGlobal(
       "URL",
       Object.assign(URL, { createObjectURL: vi.fn(() => "blob:x"), revokeObjectURL: vi.fn() }),
     );
     const el = await render();
     await click(button(el, "クローゼット"));
-    expect(el.querySelector('[data-testid="frame"]')).toBeNull();
+    expect(el.querySelector('[data-testid="frame"]')?.getAttribute("data-kind")).toBe("top");
     await click(button(el, "アウター"));
     expect(el.querySelector('[data-testid="frame"]')?.getAttribute("data-kind")).toBe("outer");
     expect(el.querySelector('[data-testid="guide"]')?.textContent).toContain(
@@ -566,7 +568,9 @@ describe("服をしまう", () => {
     expect(el.querySelector('[data-testid="frame"] img')?.getAttribute("src")).toBe("blob:x");
     sh.shrinkPhoto.mockResolvedValue(null);
     await click(button(el, "クローゼットにしまう"));
-    expect(el.querySelector('[role="alert"]')?.textContent).toBe("写真を小さくできない");
+    expect(el.querySelector('[role="alert"]')?.textContent).toBe(
+      "写真を保存できませんでした。もう一度撮り直してください。",
+    );
     sh.shrinkPhoto.mockResolvedValue("AAAA");
     await click(el.querySelector('[aria-label="暖かさ 4"]'));
     await change(el.querySelector('input[aria-label="ラベル"]'), "通勤");
@@ -589,7 +593,7 @@ describe("服をしまう", () => {
     const shelf = el.querySelector('[data-testid="shelf"]') as HTMLElement;
     expect(shelf.dataset.shelf).toBe("outer");
     expect(shelf.textContent).toContain("通勤");
-    expect(el.querySelector('[data-testid="frame"]')).toBeNull();
+    expect(el.querySelector('[data-testid="frame"]')?.getAttribute("data-kind")).toBe("outer");
     await click(button(el, "ワンピース"));
     await pickFile(el, null);
     await click(button(el, "クローゼットにしまう"));
@@ -603,7 +607,7 @@ describe("服をしまう", () => {
     expect(data).toContain("`kisekae-closet:city`");
   });
 
-  test("しまうのに失敗すれば理由を出す", async () => {
+  test("しまうのに失敗しても、サーバーの理由は出さず撮り直しを頼む", async () => {
     routes.clothes = (m) => (m === "POST" ? [400, { error: "服の形が違う" }] : [200, { clothes: CLOTHES }]);
     sh.shrinkPhoto.mockResolvedValue("AAAA");
     const el = await render();
@@ -611,7 +615,9 @@ describe("服をしまう", () => {
     await click(button(el, "トップス"));
     await pickFile(el, [new File(["x"], "a.jpg")]);
     await click(button(el, "クローゼットにしまう"));
-    expect(el.querySelector('[role="alert"]')?.textContent).toBe("服の形が違う");
+    expect(el.querySelector('[role="alert"]')?.textContent).toBe(
+      "写真を保存できませんでした。もう一度撮り直してください。",
+    );
   });
 
   test("服を消す (失敗すれば理由)", async () => {
@@ -707,6 +713,7 @@ describe("天気を 2 秒以内に出す (#21)", () => {
     await act(async () => {});
     expect(localStorage.getItem("kisekae-closet:forecast")).not.toBeNull();
     await click(el.querySelector('nav[aria-label="画面"] button:nth-child(2)'));
+    await click(button(el, "設定"));
     await click(button(el, "ログアウト"));
     expect(button(el, "はじめる")).toBeDefined();
     expect(localStorage.getItem("kisekae-closet:forecast")).toBeNull();
@@ -1024,6 +1031,7 @@ describe("テーマ (#8)", () => {
     const root = document.documentElement;
     expect(root.dataset.theme).toBe("strawberry");
     await click(button(el, "クローゼット"));
+    await click(button(el, "設定"));
     const group = el.querySelector('[aria-label="テーマの色"]') as HTMLElement;
     expect([...group.querySelectorAll("button")].map((b) => b.textContent)).toEqual([
       "いちごミルク",
@@ -1105,6 +1113,8 @@ describe("アカウント", () => {
     const el = await render();
     expect(el.querySelector("a")).toBeNull(); // 今日の画面には出さない
     await click(button(el, "クローゼット"));
+    expect(el.querySelector("a")).toBeNull(); // 設定を開くまで出さない
+    await click(button(el, "設定"));
     expect(el.querySelector("a")?.getAttribute("href")).toBe("/api/export");
     expect(Object.keys(KIND_NAMES)).toEqual(["top", "bottom", "outer", "dress", "shoes", "accessory"]);
     expect(shelfOf("dress")).toBe("dress");
@@ -1297,6 +1307,7 @@ describe("細かい見た目と後始末 (#29)", () => {
     expect(Object.keys(localStorage).filter((k) => k.startsWith("kisekae-closet:"))).toContain(
       "kisekae-closet:city",
     );
+    await click(button(el, "設定"));
     await click(button(el, "アカウントと全データを消す"));
     expect(calls).toContain("DELETE account");
     expect(Object.keys(localStorage).filter((k) => k.startsWith("kisekae-closet:"))).toEqual([]);
