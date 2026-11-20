@@ -568,7 +568,7 @@ describe("服をしまう", () => {
     expect(el.querySelector('[data-testid="frame"] img')?.getAttribute("src")).toBe("blob:x");
     sh.shrinkPhoto.mockResolvedValue(null);
     await click(button(el, "クローゼットにしまう"));
-    expect(el.querySelector('[role="alert"]')?.textContent).toBe("写真を小さくできない");
+    expect(el.querySelector('[role="alert"]')?.textContent).toBe("写真を保存できませんでした。もう一度撮り直してください。");
     sh.shrinkPhoto.mockResolvedValue("AAAA");
     await click(el.querySelector('[aria-label="暖かさ 4"]'));
     await change(el.querySelector('input[aria-label="ラベル"]'), "通勤");

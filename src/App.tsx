@@ -836,8 +836,15 @@ function ClosetRoom({
     setNote("");
     if (file === null) return setNote("写真を選ぶ");
     const photo = await shrinkPhoto(file);
-    if (photo === null) return setNote("写真を小さくできない");
-    await api.addClothing({ kind: k, warmth, label, photo });
+    const failed = "写真を保存できませんでした。もう一度撮り直してください。";
+    if (photo === null) return setNote(failed);
+    try {
+      await api.addClothing({ kind: k, warmth, label, photo });
+    } catch (e) {
+      // サーバーの理由 (Exif など) は出さない。ログイン切れ (401) と 500 などは今までどおり投げる
+      if (e instanceof ApiError && e.status !== 401 && e.status >= 400 && e.status < 500) return setNote(failed);
+      throw e;
+    }
     setShelf(shelfOf(k));
     setLabel("");
     setFile(null);
