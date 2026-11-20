@@ -607,7 +607,7 @@ describe("服をしまう", () => {
     expect(data).toContain("`kisekae-closet:city`");
   });
 
-  test("しまうのに失敗すれば理由を出す", async () => {
+  test("しまうのに失敗しても、サーバーの理由は出さず撮り直しを頼む", async () => {
     routes.clothes = (m) => (m === "POST" ? [400, { error: "服の形が違う" }] : [200, { clothes: CLOTHES }]);
     sh.shrinkPhoto.mockResolvedValue("AAAA");
     const el = await render();
@@ -615,7 +615,9 @@ describe("服をしまう", () => {
     await click(button(el, "トップス"));
     await pickFile(el, [new File(["x"], "a.jpg")]);
     await click(button(el, "クローゼットにしまう"));
-    expect(el.querySelector('[role="alert"]')?.textContent).toBe("服の形が違う");
+    expect(el.querySelector('[role="alert"]')?.textContent).toBe(
+      "写真を保存できませんでした。もう一度撮り直してください。",
+    );
   });
 
   test("服を消す (失敗すれば理由)", async () => {
