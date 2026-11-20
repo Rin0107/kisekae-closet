@@ -480,8 +480,8 @@ input {
 }
 .frame {
   position: relative;
-  width: 220px;
-  height: 220px;
+  width: min(80vw, 320px);
+  aspect-ratio: 1;
   margin: 0 auto;
   border-radius: var(--radius);
   background: var(--c-surface-2);
