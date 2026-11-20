@@ -337,14 +337,16 @@ test("AC-7-5 AC-9-2 AC-22-3 AC-25-1 AC-25-2 AC-27-3 AC-28-1 AC-28-2 AC-29-2 AC-3
   const rackBox = await page.getByTestId("rack").boundingBox();
   const narrow = await stage.boundingBox();
   expect(rackBox?.x ?? 0).toBeGreaterThanOrEqual((narrow?.x ?? 0) + (narrow?.width ?? 0));
-  // AC-41-1: 服をしまう画面の見出し『写真を撮る・選ぶ』は 1 行
+  // AC-41-1: 服をしまう画面の写真のボタンの文字は 1 行
   await page.getByRole("navigation", { name: "画面" }).getByRole("button", { name: "クローゼット" }).click();
   await page.getByRole("group", { name: "種類" }).getByRole("button", { name: "トップス" }).click();
-  const title = page.locator(".file-title");
-  await expect(title).toHaveText("写真を撮る・選ぶ");
-  expect(
-    await title.evaluate((e) => new Set([...e.getClientRects()].map((r) => Math.round(r.top))).size),
-  ).toBe(1);
+  for (const [i, text] of ["カメラで撮る", "写真から選ぶ"].entries()) {
+    const title = page.locator(".photo-button").nth(i);
+    await expect(title).toHaveText(text);
+    expect(
+      await title.evaluate((e) => new Set([...e.getClientRects()].map((r) => Math.round(r.top))).size),
+    ).toBe(1);
+  }
   await page.getByRole("navigation", { name: "画面" }).getByRole("button", { name: "今日" }).click();
   // AC-34-1: デスクトップ幅 (1280px) では台が大きい
   await page.setViewportSize({ width: 1280, height: 900 });

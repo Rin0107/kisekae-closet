@@ -373,8 +373,8 @@ describe("広い画面の並び (#40)・服をしまう画面の見出し (#41)"
     expect(d).toContain("grid-template-columns: var(--stage-w) minmax(0, 1fr)");
   });
 
-  test("AC-41-1: 服をしまう画面の見出しは折り返さず、入らなければファイルの欄が次の行に回る", () => {
-    expect(/\.file-title \{([^}]*)\}/.exec(css)?.[1]).toContain("white-space: nowrap");
-    expect(/\.file \{([^}]*display: inline-flex[^}]*)\}/.exec(css)?.[1]).toContain("flex-wrap: wrap");
+  test("AC-41-1: 写真のボタンの文字は折り返さず、入らなければボタンが次の行に回る", () => {
+    expect(/\.photo-button \{([^}]*)\}/.exec(css)?.[1]).toContain("white-space: nowrap");
+    expect(/\.photo-buttons \{([^}]*)\}/.exec(css)?.[1]).toContain("flex-wrap: wrap");
   });
 });

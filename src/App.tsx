@@ -820,17 +820,55 @@ function ClosetRoom({
           ハンガーにかけて、正面からまっすぐ撮ってください。服が枠に収まるように (顔や部屋は写さない)。
           <span data-testid="guide-bg">背景は服と違う色に (白い服なら色のある壁や布の前で)。</span>
         </p>
-        <label className="file">
-          <span className="file-title">写真を撮る・選ぶ</span>
-          <input
-            key={picker}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            aria-label="写真"
-            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-          />
-        </label>
+        <div className="photo-buttons">
+          <label className="photo-button primary">
+            <svg
+              viewBox="0 0 24 24"
+              width="24"
+              height="24"
+              aria-hidden="true"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M4 8h3l2-3h6l2 3h3v11H4z M12 17a4 4 0 1 0 0-8 4 4 0 0 0 0 8z" />
+            </svg>
+            カメラで撮る
+            <input
+              key={picker}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              className="visually-hidden"
+              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+            />
+          </label>
+          <label className="photo-button">
+            <svg
+              viewBox="0 0 24 24"
+              width="24"
+              height="24"
+              aria-hidden="true"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M4 5h16v14H4z M4 16l5-5 4 4 3-3 4 4 M9 9.5h.01" />
+            </svg>
+            写真から選ぶ
+            <input
+              key={picker}
+              type="file"
+              accept="image/*"
+              className="visually-hidden"
+              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+            />
+          </label>
+        </div>
         {preview && badCut === preview && (
           <div className="cut-bad" role="status" data-testid="cut-bad">
             <p>
