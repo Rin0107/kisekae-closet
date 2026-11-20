@@ -659,7 +659,59 @@ function Dresser({
           </span>
         )}
       </div>
-      {/* 広い画面では台の右に並べる (#40)。狭い画面では台の下に続く */}
+      {/* 台 (左) と棚 (右) を隣に、ラベル・ゲージ・決めるボタンはその下 (Rin0107/kisekae-closet-archive#50) */}
+      <section aria-label="クローゼット" className="closet">
+        <div role="tablist" aria-label="服の種類" className="shelves">
+          {SHELVES.map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              role="tab"
+              aria-selected={shelf === s.id}
+              onClick={() => setShelf(s.id)}
+            >
+              {s.name}
+            </button>
+          ))}
+        </div>
+        {pending ? (
+          <p className="empty muted">服を読んでいます…</p>
+        ) : clothes.length === 0 ? (
+          <div className="empty">
+            <p>まだ服がありません。クローゼットに服をしまうと、ここから着せられます。</p>
+            <button type="button" className="primary" onClick={onGoCloset}>
+              服をしまう
+            </button>
+          </div>
+        ) : onShelf.length === 0 ? (
+          <p className="empty muted">この棚はからっぽです</p>
+        ) : (
+          <ul className="rack" role="tabpanel" data-testid="rack">
+            {onShelf.map((c) => (
+              <li key={c.id}>
+                <button
+                  type="button"
+                  className="garment"
+                  data-testid="garment"
+                  aria-pressed={worn.some((w) => w.id === c.id)}
+                  aria-label={`${nameOf(c)}を着る`}
+                  onPointerDown={down}
+                  onPointerMove={move(c)}
+                  onPointerUp={up(c)}
+                  onPointerCancel={() => {
+                    start.current = null;
+                    setDrag(null);
+                  }}
+                  onClick={tap(c)}
+                >
+                  <Photo src={api.photoUrl(c.id)} alt="" />
+                  <span className="garment-label">{nameOf(c)}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
       <div className="dresser-side">
         <LabelRow worn={worn} />
         {(weather || pending) && <GaugeView worn={worn} weather={pending ? null : weather} />}
@@ -667,58 +719,6 @@ function Dresser({
           {decide}
           {stamp && <p className="muted">{stampNote}</p>}
         </div>
-        <section aria-label="クローゼット" className="closet">
-          <div role="tablist" aria-label="服の種類" className="shelves">
-            {SHELVES.map((s) => (
-              <button
-                key={s.id}
-                type="button"
-                role="tab"
-                aria-selected={shelf === s.id}
-                onClick={() => setShelf(s.id)}
-              >
-                {s.name}
-              </button>
-            ))}
-          </div>
-          {pending ? (
-            <p className="empty muted">服を読んでいます…</p>
-          ) : clothes.length === 0 ? (
-            <div className="empty">
-              <p>まだ服がありません。クローゼットに服をしまうと、ここから着せられます。</p>
-              <button type="button" className="primary" onClick={onGoCloset}>
-                服をしまう
-              </button>
-            </div>
-          ) : onShelf.length === 0 ? (
-            <p className="empty muted">この棚はからっぽです</p>
-          ) : (
-            <ul className="rack" role="tabpanel" data-testid="rack">
-              {onShelf.map((c) => (
-                <li key={c.id}>
-                  <button
-                    type="button"
-                    className="garment"
-                    data-testid="garment"
-                    aria-pressed={worn.some((w) => w.id === c.id)}
-                    aria-label={`${nameOf(c)}を着る`}
-                    onPointerDown={down}
-                    onPointerMove={move(c)}
-                    onPointerUp={up(c)}
-                    onPointerCancel={() => {
-                      start.current = null;
-                      setDrag(null);
-                    }}
-                    onClick={tap(c)}
-                  >
-                    <Photo src={api.photoUrl(c.id)} alt="" />
-                    <span className="garment-label">{nameOf(c)}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
       </div>
       {drag && (
         <Photo
