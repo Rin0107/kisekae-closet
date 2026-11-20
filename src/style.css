@@ -555,8 +555,15 @@ input {
   font-size: var(--fs-s);
 }
 .warmth button {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: var(--tap);
   color: var(--c-primary-strong);
-  letter-spacing: -2px;
+}
+.warmth-example {
+  font-size: var(--fs-s);
+  color: var(--c-muted);
 }
 
 /* カレンダー */

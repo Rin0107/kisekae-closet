@@ -40,6 +40,15 @@ export const KIND_NAMES: Record<string, string> = {
   accessory: "こもの",
 };
 
+/** 服の暖かさ 5 段階の言葉と服の例 (●の数だけでは選べない、#49)。 */
+export const WARMTH: { name: string; example: string }[] = [
+  { name: "とても薄い", example: "Tシャツ" },
+  { name: "薄手", example: "シャツ" },
+  { name: "ふつう", example: "ニット" },
+  { name: "厚手", example: "ジャケット" },
+  { name: "とても暖かい", example: "ダウン" },
+];
+
 /** クローゼットのタブ。種類ごとに 1 つ (ワンピースにも自分のタブ、#35)。 */
 export const SHELVES: { id: string; name: string; kinds: string[] }[] = [
   { id: "top", name: "トップス", kinds: ["top"] },
@@ -934,7 +943,8 @@ function ClosetRoom({
               aria-label={`暖かさ ${n}`}
               onClick={() => setWarmth(n)}
             >
-              {"●".repeat(n)}
+              <span className="warmth-name">{WARMTH[n - 1]?.name}</span>
+              <span className="warmth-example">{WARMTH[n - 1]?.example}</span>
             </button>
           ))}
         </div>
@@ -973,7 +983,7 @@ function ClosetRoom({
             <li key={c.id} className="garment">
               <Photo src={api.photoUrl(c.id)} alt={nameOf(c)} />
               <span className="garment-label">{nameOf(c)}</span>
-              <span className="muted">暖かさ {"●".repeat(c.warmth)}</span>
+              <span className="muted">暖かさ: {WARMTH[c.warmth - 1]?.name}</span>
               <button
                 type="button"
                 className="ghost small"
