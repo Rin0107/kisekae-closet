@@ -327,10 +327,25 @@ input {
   font-size: var(--fs-s);
   color: var(--c-muted);
   margin-top: var(--sp-1);
+  white-space: nowrap;
 }
 .gauge-word {
   margin: var(--sp-1) 0 0;
   text-align: center;
+  white-space: nowrap;
+}
+.gauge-advice {
+  margin: var(--sp-1) 0 0;
+  text-align: center;
+  font-size: var(--fs-s);
+  font-weight: 700;
+  color: var(--c-primary-strong);
+}
+.gauge-advice[data-band="cold"] {
+  color: #2c5b91;
+}
+.gauge-advice[data-band="hot"] {
+  color: #a3401d;
 }
 .decide-row {
   display: grid;

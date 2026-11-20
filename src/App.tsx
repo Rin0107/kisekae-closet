@@ -15,7 +15,7 @@ import { cutoutOk, forgetCutout } from "./cutout";
 import { Photo } from "./Photo";
 import { LIKENESS_NAMES, likeness, monthGrid, shiftMonth, sky, SKY_NAMES, type Sky } from "./calendar";
 import { api, ApiError, type Clothing, type Outfit } from "./client";
-import { BAND_NAMES, dressIn, gauge, takeOff, wear } from "./outfit";
+import { advice, BAND_NAMES, dressIn, gauge, takeOff, wear } from "./outfit";
 import { login, register } from "./passkey";
 import { recommend } from "./recommend";
 import { shrinkPhoto } from "./shrink";
@@ -609,6 +609,9 @@ function GaugeView({ worn, weather }: { worn: Clothing[]; weather: Weather | nul
       </div>
       <p className="gauge-word">
         暖かさ: <strong>{BAND_NAMES[g.band]}</strong>
+      </p>
+      <p className="gauge-advice" data-testid="gauge-advice" data-band={g.band}>
+        {advice(g.band)}
       </p>
     </div>
   );

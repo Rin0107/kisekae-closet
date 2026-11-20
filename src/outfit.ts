@@ -142,6 +142,16 @@ const COUNTED = new Set(["top", "bottom", "dress", "outer"]);
 export type Band = "cold" | "ok" | "hot";
 export const BAND_NAMES: Record<Band, string> = { cold: "寒い", ok: "ちょうどいい", hot: "暑い" };
 
+/** いまの服でどうすればいいかの一言 (数字は出さない)。 */
+export const ADVICE: Record<Band, string> = {
+  cold: "少し寒そう。もう1枚重ねよう",
+  ok: "ちょうどいい。このままでOK",
+  hot: "少し暑そう。1枚減らそう",
+};
+export function advice(b: Band): string {
+  return ADVICE[b];
+}
+
 export interface Gauge {
   band: Band;
   /** 帯の上のつまみの位置 (0 = 一番寒い、1 = 一番暑い)。 */
