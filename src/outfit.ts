@@ -433,8 +433,22 @@ export function pieces(
   const oy = (s: Sleeve | null, t: number) => (s === null ? 0 : sleeveOrigin(s, t) * 100);
   return [
     // 左の袖は付け根 (右の端) を中心に時計回り (外へ)、右の袖は反時計回り
-    { from: 0, to: lc, box: at(0, lc, -shift), turn: lt, scale: lf.scale, origin: { x: 100, y: oy(left, lt) } },
+    {
+      from: 0,
+      to: lc,
+      box: at(0, lc, -shift),
+      turn: lt,
+      scale: lf.scale,
+      origin: { x: 100, y: oy(left, lt) },
+    },
     ...body,
-    { from: rc, to: 1, box: at(rc, 1, shift), turn: -rt, scale: rf.scale, origin: { x: 0, y: oy(right, rt) } },
+    {
+      from: rc,
+      to: 1,
+      box: at(rc, 1, shift),
+      turn: -rt,
+      scale: rf.scale,
+      origin: { x: 0, y: oy(right, rt) },
+    },
   ];
 }
