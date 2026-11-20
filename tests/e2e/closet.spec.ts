@@ -106,7 +106,7 @@ async function stash(page: Page, kind: string, label: string, warmth: number, pn
   // AC-27-3: 撮り方の案内に背景の色のこと
   await expect(page.getByTestId("guide-bg")).toContainText("背景は服と違う色");
   await page
-    .getByLabel("写真", { exact: true })
+    .getByLabel("写真から選ぶ", { exact: true })
     .setInputFiles({ name: "a.png", mimeType: "image/png", buffer: png });
   // AC-25-1: 下見は切り抜かれて出る (白い背景の 300×300 から、服のところだけの大きさになる)
   const preview = page.getByAltText("選んだ写真");
@@ -161,7 +161,7 @@ test("AC-46-1 AC-47-1: 天気が読めない新しい端末でも、服を着せ
   await page.getByRole("navigation", { name: "画面" }).getByRole("button", { name: "クローゼット" }).click();
   await page.getByRole("group", { name: "種類" }).getByRole("button", { name: "トップス" }).click();
   await page
-    .getByLabel("写真", { exact: true })
+    .getByLabel("写真から選ぶ", { exact: true })
     .setInputFiles({ name: "w.png", mimeType: "image/png", buffer: await garment(page, "#fefefe", "top") });
   await expect(page.getByTestId("cut-bad")).toContainText("切り抜けませんでした");
   await page.getByRole("button", { name: "撮り直す" }).click();
