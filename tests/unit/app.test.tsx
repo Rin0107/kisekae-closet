@@ -144,10 +144,6 @@ describe("ログインの前", () => {
     await click(button(el, "はじめる"));
     expect(pk.register).toHaveBeenCalledWith("わたし");
     expect(el.querySelector('section[aria-label="クローゼット"]')).not.toBeNull();
-    // 見本の写真が読めない (このテストの fetch は 404) ときは、入らなかった枚数を一言知らせる
-    expect(el.querySelector('[role="alert"]')?.textContent).toBe(
-      "見本の服を 6 枚入れられませんでした。服は「クローゼット」から入れられます。",
-    );
     document.body.replaceChildren();
     routes.me = () => [401, { error: "x" }];
     el = await render();
@@ -1330,5 +1326,106 @@ describe("細かい見た目と後始末 (#29)", () => {
     expect(calls).toContain("DELETE account");
     expect(Object.keys(localStorage).filter((k) => k.startsWith("kisekae-closet:"))).toEqual([]);
     expect(localStorage.getItem("other-app")).toBe("1");
+  });
+});
+
+describe("見本の服 (#79)", () => {
+  // 見本の写真 (/samples/*.jpg) は読めるようにし、入れた服をクローゼットに足していく
+  let stored: { id: string; kind: string; warmth: number; label: string; createdAt: number }[];
+  beforeEach(() => {
+    stored = [];
+    const api = fetch;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: { method?: string; body?: string }) => {
+        if (url.startsWith("/samples/")) {
+          calls.push(`GET ${url}`);
+          return new Response(new Blob([new Uint8Array([1])], { type: "image/jpeg" }));
+        }
+        return api(url, init);
+      }),
+    );
+    sh.shrinkPhoto.mockResolvedValue("AAAA");
+    routes.clothes = (m, body) => {
+      if (m !== "POST") return [200, { clothes: stored }];
+      const b = JSON.parse(body as string) as { kind: string; warmth: number; label: string };
+      stored.push({ id: `n${stored.length}`, ...b, createdAt: stored.length });
+      return [201, { id: `n${stored.length}` }];
+    };
+  });
+  const posted = () =>
+    calls
+      .filter((c) => c.startsWith("POST clothes "))
+      .map((c) => (JSON.parse(c.slice("POST clothes ".length)) as { kind: string; label: string }).label);
+  const shelfTab = (el: HTMLElement, name: string) =>
+    [...el.querySelectorAll('[aria-label="服の種類"] [role="tab"]')].find((b) => b.textContent === name);
+
+  test("AC-79-1: クローゼットが空のアカウントで開くと、6 種類の見本が 1 枚ずつ入り、すぐ棚に並ぶ", async () => {
+    const el = await render();
+    await settle();
+    expect(posted()).toEqual([
+      "見本 ニット",
+      "見本 ワンピース",
+      "見本 ジーンズ",
+      "見本 ジャケット",
+      "見本 革ぐつ",
+      "見本 麦わら帽子",
+    ]);
+    expect(stored.map((c) => c.kind).sort()).toEqual(Object.keys(KIND_NAMES).sort());
+    expect(el.querySelectorAll('[data-testid="garment"]').length).toBeGreaterThan(0);
+    expect(el.textContent).not.toContain("まだ服がありません");
+    expect(el.querySelector('[role="alert"]')).toBeNull();
+  });
+
+  test("AC-79-2: 服がもうあれば見本は入れない (自分の服に重ねない)", async () => {
+    stored = [{ id: "t1", kind: "top", warmth: 1, label: "白T", createdAt: 1 }];
+    await render();
+    await settle();
+    expect(posted()).toEqual([]);
+    expect(calls.some((c) => c.startsWith("GET /samples/"))).toBe(false);
+  });
+
+  test("AC-79-1: 見本が入らなければ枚数を一言知らせ、開いているあいだは繰り返さない", async () => {
+    sh.shrinkPhoto.mockResolvedValue(null);
+    const el = await render();
+    await settle();
+    expect(el.querySelector('[role="alert"]')?.textContent).toBe(
+      "見本の服を 6 枚入れられませんでした。服は「クローゼット」から入れられます。",
+    );
+    expect(el.textContent).toContain("まだ服がありません");
+    const tried = calls.filter((c) => c.startsWith("GET /samples/")).length;
+    await click(button(el, "クローゼット"));
+    await settle();
+    expect(calls.filter((c) => c.startsWith("GET /samples/")).length).toBe(tried);
+  });
+
+  test("AC-79-3: 空の棚の「見本を入れる」で、その種類の見本だけが入る (消したあとでも戻せる)", async () => {
+    stored = [{ id: "t1", kind: "top", warmth: 1, label: "白T", createdAt: 1 }];
+    const el = await render();
+    await click(button(el, "クローゼット"));
+    // 服がある棚には出ない
+    expect(button(el, "見本を入れる")).toBeUndefined();
+    await click(shelfTab(el, "ボトムス"));
+    expect(el.textContent).toContain("ボトムスはまだありません");
+    await click(button(el, "見本を入れる"));
+    await settle();
+    expect(posted()).toEqual(["見本 ジーンズ"]);
+    const shelf = el.querySelector('[data-testid="shelf"]');
+    expect(shelf?.textContent).toContain("見本 ジーンズ");
+    expect(button(el, "見本を入れる")).toBeUndefined();
+  });
+
+  test("AC-79-3: 見本が入らなければ知らせ、ボタンはまた押せる", async () => {
+    stored = [{ id: "t1", kind: "top", warmth: 1, label: "白T", createdAt: 1 }];
+    const el = await render();
+    await click(button(el, "クローゼット"));
+    await click(shelfTab(el, "くつ"));
+    sh.shrinkPhoto.mockResolvedValue(null);
+    await click(button(el, "見本を入れる"));
+    await settle();
+    expect(el.textContent).toContain(
+      "見本の服を 1 枚入れられませんでした。服は「クローゼット」から入れられます。",
+    );
+    expect((button(el, "見本を入れる") as HTMLButtonElement).disabled).toBe(false);
   });
 });

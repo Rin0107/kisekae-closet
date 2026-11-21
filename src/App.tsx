@@ -71,6 +71,9 @@ export function today(d = new Date()): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
+const samplesMissed = (n: number) =>
+  `見本の服を ${n} 枚入れられませんでした。服は「クローゼット」から入れられます。`;
+
 function message(e: unknown): string {
   return e instanceof Error ? e.message : "失敗した";
 }
@@ -100,8 +103,6 @@ type Wx =
 
 export function App() {
   const [state, setState] = useState<"loading" | "out" | "in">("loading");
-  // 始めたときの一言 (見本の服が入りきらなかったなど)
-  const [notice, setNotice] = useState("");
   // この端末でログインして使ったことがあれば (前回の予報がある)、天気はログインの確かめと同時に読み始める。
   // 使ったことのない端末では、ログインの前に外へ通信しない (確かめのあと Home が読む)
   const [first] = useState<FirstForecast | null>(() => {
@@ -120,25 +121,16 @@ export function App() {
     api.me().then(() => setState("in"), out);
   }, [out]);
   if (state === "loading") return <main aria-busy="true" />;
-  return state === "in" ? (
-    <Home first={first} onOut={out} notice={notice} />
-  ) : (
-    <Welcome
-      onIn={(n) => {
-        setNotice(n);
-        setState("in");
-      }}
-    />
-  );
+  return state === "in" ? <Home first={first} onOut={out} /> : <Welcome onIn={() => setState("in")} />;
 }
 
-function Welcome({ onIn }: { onIn: (notice: string) => void }) {
+function Welcome({ onIn }: { onIn: () => void }) {
   const [name, setName] = useState("");
   const [error, setError] = useState("");
-  const run = (f: () => Promise<string | undefined>) => () => {
+  const run = (f: () => Promise<void>) => () => {
     setError("");
     f().then(
-      (n) => onIn(n ?? ""),
+      () => onIn(),
       (e: unknown) => setError(message(e)),
     );
   };
@@ -175,11 +167,6 @@ function Welcome({ onIn }: { onIn: (notice: string) => void }) {
         className="primary"
         onClick={run(async () => {
           await register(name.trim() || "kisekae-closet");
-          // 新しいアカウントには、見本の服を 1 セット入れておく
-          const n = await addSamples();
-          if (n < SAMPLES.length)
-            return `見本の服を ${SAMPLES.length - n} 枚入れられませんでした。服は「クローゼット」から入れられます。`;
-          return undefined;
         })}
       >
         はじめる
@@ -189,7 +176,6 @@ function Welcome({ onIn }: { onIn: (notice: string) => void }) {
         className="ghost"
         onClick={run(async () => {
           await login();
-          return undefined;
         })}
       >
         パスキーでログイン
@@ -220,15 +206,7 @@ const TABS: { id: Tab; name: string }[] = [
   { id: "calendar", name: "カレンダー" },
 ];
 
-function Home({
-  first,
-  onOut,
-  notice = "",
-}: {
-  first: FirstForecast | null;
-  onOut: () => void;
-  notice?: string;
-}) {
+function Home({ first, onOut }: { first: FirstForecast | null; onOut: () => void }) {
   const [clothes, setClothes] = useState<Clothing[]>([]);
   const [outfits, setOutfits] = useState<Outfit[]>([]);
   // 服とコーデが 1 度届くまでは、アバターを下着姿にせず、ゲージも寒いにしない (#28)
@@ -244,7 +222,7 @@ function Home({
   // null: まだ触っていない (決めたコーデか、おすすめを着る)
   const [worn, setWorn] = useState<Clothing[] | null>(null);
   const [sparkle, setSparkle] = useState(0);
-  const [error, setError] = useState(notice);
+  const [error, setError] = useState("");
   // 天気が読めないうちに決めたコーデ (#46)。今日より前の日のものは、もう保存できないので捨てる
   const [pending, setPending] = useState<Pending | null>(() => {
     const p = load("pending", Pending.nullable(), null);
@@ -256,19 +234,24 @@ function Home({
     (e: unknown) => (e instanceof ApiError && e.status === 401 ? onOut() : setError(message(e))),
     [onOut],
   );
+  // 開いたときクローゼットが空なら、見本を 1 種類 1 枚ずつ入れる (#79)。前からあるアカウントにも。
+  // 1 回開くあいだに 1 度だけ (入らなくても繰り返さない)
+  const [seeded] = useState(() => ({ done: false }));
   const reload = useCallback(() => {
-    Promise.all([api.clothes(), api.outfits()]).then(
-      ([c, o]) => {
+    Promise.all([api.clothes(), api.outfits()])
+      .then(async ([c, o]) => {
+        if (c.length === 0 && !seeded.done) {
+          seeded.done = true;
+          const n = await addSamples();
+          if (n < SAMPLES.length) setError(samplesMissed(SAMPLES.length - n));
+          if (n > 0) c = await api.clothes();
+        }
         setClothes(c);
         setOutfits(o);
-        setLoaded(true);
-      },
-      (e: unknown) => {
-        setLoaded(true);
-        fail(e);
-      },
-    );
-  }, [fail]);
+      })
+      .catch(fail)
+      .finally(() => setLoaded(true));
+  }, [fail, seeded]);
   useEffect(reload, [reload]);
   useEffect(() => {
     save("city", city);
@@ -879,6 +862,7 @@ function ClosetRoom({
   const [file, setFile] = useState<File | null>(null);
   const [shelf, setShelf] = useState("top");
   const [note, setNote] = useState("");
+  const [addingSample, setAddingSample] = useState(false);
   // 選んだ写真の下見 (端末の中の blob: だけ。送らない)
   const preview = useMemo(
     () => (file !== null && typeof URL.createObjectURL === "function" ? URL.createObjectURL(file) : ""),
@@ -1126,6 +1110,25 @@ function ClosetRoom({
             >
               {shelfName}を撮る
             </button>
+            {SAMPLES.some((s) => kinds.includes(s.kind)) && (
+              <button
+                type="button"
+                className="ghost"
+                disabled={addingSample}
+                onClick={() => {
+                  setAddingSample(true);
+                  addSamples(kinds)
+                    .then((n) => {
+                      if (n === 0) throw new Error(samplesMissed(1));
+                      onChange();
+                    })
+                    .catch(onError)
+                    .finally(() => setAddingSample(false));
+                }}
+              >
+                見本を入れる
+              </button>
+            )}
           </li>
         )}
       </ul>

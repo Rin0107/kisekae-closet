@@ -63,3 +63,35 @@ test("1 枚入らなくても、ほかの見本は入れる (読めない・縮�
   cl.api.addClothing.mockRejectedValueOnce(new Error("送れない")).mockResolvedValue({ id: "x" });
   expect(await addSamples()).toBe(SAMPLES.length - 3);
 });
+
+test("AC-79-2: 種類を渡せば、その種類の見本だけを入れる", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => new Response(new Blob([new Uint8Array(1)]))),
+  );
+  sh.shrinkPhoto.mockResolvedValue("AAAA");
+  cl.api.addClothing.mockResolvedValue({ id: "x" });
+  expect(await addSamples(["shoes"])).toBe(1);
+  expect(cl.api.addClothing).toHaveBeenCalledTimes(1);
+  expect(cl.api.addClothing.mock.calls[0]?.[0]).toMatchObject({ kind: "shoes", label: "見本 革ぐつ" });
+  expect(await addSamples([])).toBe(0);
+});
+
+/** JPEG の大きさ (SOF の高さと幅) を読む。 */
+function jpegSize(b: Buffer): { width: number; height: number } {
+  let i = 2;
+  while (i < b.length) {
+    const marker = b[i + 1] ?? 0;
+    const len = b.readUInt16BE(i + 2);
+    if (marker >= 0xc0 && marker <= 0xc3)
+      return { height: b.readUInt16BE(i + 5), width: b.readUInt16BE(i + 7) };
+    i += 2 + len;
+  }
+  throw new Error("SOF がない");
+}
+
+test("AC-79-4: 見本のジーンズの写真は、撮影者の帯 (下の 36px ほど) を切り落としてある", () => {
+  // 元の写真は 652×1024 で、y=991 から下が灰色の帯。帯の上の白い余白 (y=988) で切った
+  expect(jpegSize(readFileSync("public/samples/bottom.jpg"))).toEqual({ width: 652, height: 988 });
+  expect(readFileSync("public/samples/LICENSE.md", "utf8")).toContain("`bottom.jpg` は、下の撮影者の帯");
+});

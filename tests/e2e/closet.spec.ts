@@ -99,15 +99,24 @@ async function garment(
   return Buffer.from(b64, "base64");
 }
 
-/** 新しいアカウントに入る見本の服を消す (自分でしまった服だけで確かめるテスト用)。消したら読み直す。 */
+/**
+ * 新しいアカウントに入る見本の服を消す (自分でしまった服だけで確かめるテスト用)。
+ * ページを読み直すと、空のクローゼットにはまた見本が入る (#79)。だから見本のニットだけ残して消し、
+ * 最後の 1 枚はクローゼットの「消す」で消す (画面の中で読み直す)。
+ */
 async function clearSamples(page: Page) {
   await expect(page.getByRole("button", { name: "見本 ニットを着る" })).toBeVisible();
   await page.evaluate(async () => {
     const r = (await (await fetch("/api/clothes")).json()) as { clothes: { id: string; label: string }[] };
     for (const c of r.clothes)
-      if (c.label.startsWith("見本")) await fetch(`/api/clothes/${c.id}`, { method: "DELETE" });
+      if (c.label.startsWith("見本") && c.label !== "見本 ニット")
+        await fetch(`/api/clothes/${c.id}`, { method: "DELETE" });
   });
-  await page.reload();
+  await page.getByRole("navigation", { name: "画面" }).getByRole("button", { name: "クローゼット" }).click();
+  page.once("dialog", (d) => void d.accept());
+  await page.getByTestId("shelf").getByRole("button", { name: "消す" }).click();
+  await expect(page.getByTestId("shelf")).not.toContainText("見本 ニット");
+  await page.getByRole("navigation", { name: "画面" }).getByRole("button", { name: "今日" }).click();
   await expect(page.getByRole("button", { name: "見本 ニットを着る" })).toHaveCount(0);
 }
 
@@ -460,4 +469,30 @@ test("見本: 新しいアカウントには 6 種類の見本の服が 1 枚ず
   const pad = await page.locator("main").evaluate((m) => getComputedStyle(m).paddingTop);
   expect(parseFloat(pad)).toBeGreaterThanOrEqual(16);
   await page.screenshot({ path: shot("today-samples") });
+});
+
+test("AC-79-1: 服が 1 枚もないアカウントで開くと、見本の服が 1 種類 1 枚ずつ入り、すぐ着せられる", async ({
+  page,
+  baseURL,
+}) => {
+  test.skip(baseURL?.startsWith("https://") === true, "本番・プレビューにはアカウントを作らない");
+  await authenticator(page);
+  await page.route("https://api.open-meteo.com/**", (r) => r.fulfill({ json: forecast(new Date()) }));
+  await page.goto("./");
+  await page.getByRole("button", { name: "はじめる" }).click();
+  await expect(page.getByRole("button", { name: "見本 ニットを着る" })).toBeVisible();
+  // 見本ができる前に作ったアカウントと同じ、空のクローゼットにする
+  await page.evaluate(async () => {
+    const r = (await (await fetch("/api/clothes")).json()) as { clothes: { id: string }[] };
+    for (const c of r.clothes) await fetch(`/api/clothes/${c.id}`, { method: "DELETE" });
+  });
+  await page.reload();
+  await expect(page.getByRole("button", { name: "見本 ニットを着る" })).toBeVisible();
+  const kinds = await page.evaluate(async () => {
+    const r = (await (await fetch("/api/clothes")).json()) as { clothes: { kind: string }[] };
+    return r.clothes.map((c) => c.kind).sort();
+  });
+  expect(kinds).toEqual(["accessory", "bottom", "dress", "outer", "shoes", "top"]);
+  await expect(page.getByTestId("stage").getByTestId("worn")).not.toHaveCount(0);
+  await page.screenshot({ path: shot("today-samples-again") });
 });
