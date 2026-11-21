@@ -168,6 +168,8 @@ test("AC-46-1 AC-47-1: 天気が読めない新しい端末でも、服を着せ
   await page.route("https://api.open-meteo.com/**", (r) => r.abort());
   await page.goto("./");
   await page.getByRole("button", { name: "はじめる" }).click();
+  // 見本の服は消す (自分でしまった服 1 枚だけで確かめる)
+  await clearSamples(page);
 
   // AC-47-1: 白い背景の白い服は切り抜けないと知らせ、撮り直しを選べる
   await page.getByRole("navigation", { name: "画面" }).getByRole("button", { name: "クローゼット" }).click();
@@ -186,7 +188,10 @@ test("AC-46-1 AC-47-1: 天気が読めない新しい端末でも、服を着せ
   // AC-46-1: 天気が読めなくても、着せれば決められる (保存は天気が読めてから)
   await page.getByRole("navigation", { name: "画面" }).getByRole("button", { name: "今日" }).click();
   await expect(page.getByTestId("weather-failed")).toBeVisible();
-  await page.getByRole("button", { name: "ピンクニットを着る" }).click();
+  // 天気が読めなくても、ふだんの天気でおすすめを着ていることがある (評価 9)。着ていなければ着せる
+  const knit = page.getByRole("button", { name: "ピンクニットを着る" });
+  if ((await knit.getAttribute("aria-pressed")) !== "true") await knit.click();
+  await expect(knit).toHaveAttribute("aria-pressed", "true");
   await page.getByRole("button", { name: "これに決めた" }).click();
   await expect(page.getByTestId("stamp")).toBeVisible();
   await expect(page.getByText("天気が読めたら、その日の天気と一緒にカレンダーに保存します")).toBeVisible();
