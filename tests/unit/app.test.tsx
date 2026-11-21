@@ -174,7 +174,9 @@ const account = async (el: HTMLElement, text: string) => {
   return button(el, text);
 };
 const worn = (root: HTMLElement) =>
-  [...root.querySelectorAll('[data-testid="stage"] [data-testid="worn"]')].map((i) => i.getAttribute("alt"));
+  [...root.querySelectorAll('[data-testid="stage"] [data-testid="worn"]')].map((i) =>
+    i.getAttribute("data-label"),
+  );
 /** 台で着ている服の ID (並びは問わないので並べ替える)。 */
 const ids = (root: HTMLElement) =>
   worn(root)
@@ -204,10 +206,10 @@ describe("ログインのあと: 今日の画面", () => {
     const el = await render();
     expect(el.querySelector('[data-testid="weather"]')?.textContent).toBe("30℃ / 24℃・湿度 60%・雨 0mm");
     expect(el.querySelector('svg[aria-label="晴れ"]')).not.toBeNull();
-    expect(worn(el)).toEqual(["白T", "デニム", "スニーカー"]);
-    const img = el.querySelector('[data-testid="worn"]') as HTMLImageElement;
-    expect(img.getAttribute("src")).toBe("/api/clothes/t1/photo");
-    expect(img.style.top).toBe("14%");
+    // 重ねる順 (ボトムス・くつ・トップス、着せ替え v2)
+    expect(worn(el)).toEqual(["デニム", "スニーカー", "白T"]);
+    const img = el.querySelector('[data-testid="worn"][data-kind="top"]') as Element;
+    expect(img.getAttribute("href")).toBe("/api/clothes/t1/photo");
     expect(el.querySelector('[data-testid="labels"]')?.textContent).toBe("白Tデニムスニーカー");
   });
 
@@ -884,7 +886,7 @@ describe("カレンダー", () => {
     const picked = el.querySelector('[data-testid="picked"]') as HTMLElement;
     expect(worn(picked)).toEqual(["スニーカー", "花柄"]);
     await click(button(el, "今日"));
-    expect(worn(el)).toEqual(["白T", "デニム", "スニーカー"]); // 押しただけでは替わらない
+    expect(worn(el)).toEqual(["デニム", "スニーカー", "白T"]); // 押しただけでは替わらない
     await click(button(el, "カレンダー"));
     await click(el.querySelector(`[data-testid="day-${other}"]`));
     await click(button(el, "この日のコーデにする"));
@@ -962,7 +964,7 @@ describe("先の日のコーデを決めておく (#7)", () => {
     expect(worn(el)).toEqual(expect.arrayContaining(["ニット", "コート"]));
     await click(button(el, "今日に戻る"));
     expect(el.querySelector('[data-testid="plan-bar"]')).toBeNull();
-    expect(worn(el)).toEqual(["白T", "デニム", "スニーカー"]);
+    expect(worn(el)).toEqual(["デニム", "スニーカー", "白T"]);
   });
 
   test("AC-7-1: 15 日先 (予報の最後の日) まで決めておける", async () => {
@@ -1280,7 +1282,7 @@ describe("開いた瞬間の絵 (#28)", () => {
     await act(async () => {});
     expect((el.querySelector('[data-testid="gauge"]') as HTMLElement).dataset.band).toBe("ok");
     expect(stage.querySelector('[data-testid="wear-pending"]')).toBeNull();
-    expect(worn(el)).toEqual(["白T", "デニム", "スニーカー"]);
+    expect(worn(el)).toEqual(["デニム", "スニーカー", "白T"]);
   });
 
   test("服の一覧が読めなくても、読み込み中のままにしない", async () => {

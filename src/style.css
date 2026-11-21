@@ -186,20 +186,6 @@ input {
   box-shadow: var(--shadow);
   overflow: hidden;
 }
-.stage .body {
-  object-fit: contain;
-  pointer-events: none;
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-}
-.wear {
-  position: absolute;
-  object-fit: contain;
-  filter: drop-shadow(0 2px 3px rgb(0 0 0 / 0.18));
-  pointer-events: none;
-}
 .sparkle {
   position: absolute;
   inset: 0;
@@ -814,38 +800,28 @@ input {
     opacity: 1;
   }
 }
-.wear {
-  object-position: 50% 0;
-}
-/* くつは左右の足に 1 足ずつ (#32)。箱から外の半分は見せない。写真は箱の 2 倍の幅で、曲げない */
-.wear-foot {
-  position: absolute;
-  overflow: hidden;
-  pointer-events: none;
-}
-/* 切り分けた服の片 (袖・身ごろ、#37 #38)。片の外は見せない。写真は片の幅の何倍かで、曲げない */
-.wear-piece {
-  position: absolute;
-  overflow: hidden;
-  pointer-events: none;
-}
-/*
- * 切り分けた服 1 枚分の入れ物。影はここに付ける: 中の写真に付けると身ごろの縁の影が袖の片に入って袖と一緒に回り (#44)、
- * 片ごとに付けると継ぎ目に縦の線が出る (#47)
- */
-.wear-cut {
+/* マネキン (着せ替え v2): 1 色の面と、継ぎ目の細い線だけ。服の色を邪魔しない淡い色 */
+.stage-svg {
   position: absolute;
   inset: 0;
-  pointer-events: none;
-  filter: drop-shadow(0 2px 3px rgb(0 0 0 / 0.18));
+  width: 100%;
+  height: 100%;
+  overflow: visible;
 }
-.wear-piece .wear {
-  max-width: none;
-  filter: none;
+.m-fill {
+  fill: color-mix(in srgb, var(--c-surface-2) 45%, #ddd7ce);
+  stroke: color-mix(in srgb, var(--c-line) 40%, #bdb5a9);
+  stroke-width: 0.3;
+  stroke-linejoin: round;
 }
-.wear-foot .wear-shoes {
-  max-width: none;
-  object-position: 50% 100%;
+.m-seam {
+  fill: none;
+  stroke: color-mix(in srgb, var(--c-line) 40%, #bdb5a9);
+  stroke-width: 0.3;
+  stroke-linecap: round;
+}
+.wear-g {
+  filter: drop-shadow(0 0.6px 0.8px rgb(0 0 0 / 0.18));
 }
 
 /* 先の日のコーデを決めているとき (今日の画面の上) */

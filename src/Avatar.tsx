@@ -1,182 +1,267 @@
-// アバターの台。正面に固定したすらっとした等身の姿 (写真に近い 3D の絵、#22) に、服の写真をそのまま (曲げずに) 重ねる。
-// 台の大きさは CSS で固定 (--stage-w・--stage-h)。中身の数で変わらない。
-// 顔写真は使わない。体は回さない (idea.md の「デザイン」)。服の袖は切り分けて腕の向きに置く (#37)。
-import { forwardRef, useState, type SyntheticEvent } from "react";
+// アバターの台 (着せ替え v2、docs/spec-v2-fitting.md)。顔も髪もない、のっぺりしたマネキンの平らな絵 (SVG) に、
+// 切り抜いた服の写真を「印 2 点を体の 2 点に重ねる相似変換」だけで重ねる (曲げない・切らない)。
+// マネキンのほうが服に合わせる: 腕は一番外の服の袖口へ、脚はボトムスの裾へ向く (src/fit.ts の dress)。
+// 台の大きさは CSS で固定 (--stage-w・--stage-h)。中は cm の世界 (viewBox が STAGE)。
+import { forwardRef, useEffect, useId, useMemo, useState } from "react";
 import { api, type Clothing } from "./client";
+import { cutoutInfo, type Cut } from "./cutout";
 import {
-  measureSleeve,
-  pieceTransform,
-  pieces,
-  place,
-  shoeFeet,
-  SLOTS,
-  STAGE_RATIO,
-  type Box,
-  type Sleeve,
-} from "./outfit";
-import { Photo } from "./Photo";
+  body as makeBody,
+  cropFit,
+  DEFAULT_FIT,
+  dress,
+  guessFit,
+  OPEN_GAP,
+  STAGE,
+  type Adj,
+  type Body,
+  type Dressed,
+  type Fit,
+  type Limb,
+  type Mat,
+  type Piece,
+  type Placed,
+  type Pose,
+  type Pt,
+} from "./fit";
 
-/**
- * 体の絵。CC0 の 3D の人体 (MakeHuman) を Blender で正面から描いたもの (public/avatar/LICENSE.md)。
- * repo の中に置き、外部から読まない。服を置く場所は絵を測った目印に合わせる (outfit.ts の BODY・SLOTS)。
- */
-function Body() {
-  return <img className="body" src="/avatar/body.webp" alt="" width={200} height={400} draggable={false} />;
+/** 写真の大きさが分からない (切り抜けない端末) ときの仮の大きさ。 */
+const UNKNOWN_SIDE = 100;
+
+/** 着た服の切り抜き (届いたものから)。 */
+export function useCuts(worn: Clothing[]): ReadonlyMap<string, Cut> {
+  const [cuts, setCuts] = useState<ReadonlyMap<string, Cut>>(new Map());
+  const key = worn.map((c) => c.id).join(",");
+  useEffect(() => {
+    let live = true;
+    for (const id of key.split(",").filter(Boolean)) {
+      void cutoutInfo(api.photoUrl(id)).then((c) => {
+        if (live) setCuts((m) => (m.get(id) === c ? m : new Map(m).set(id, c)));
+      });
+    }
+    return () => {
+      live = false;
+    };
+  }, [key]);
+  return cuts;
 }
 
-/** 箱の位置と大きさ (台に対する %)。height が null なら写真の縦横比のまま。 */
-function boxStyle(b: Box) {
+/** 切り抜いた写真の上の印。保存した印があればそれを、なければ形から推し量る。 */
+export function pieceOf(c: Clothing, cut: Cut): Piece {
+  const w = cut.box?.w ?? cut.full?.w ?? UNKNOWN_SIDE;
+  const h = cut.box?.h ?? cut.full?.h ?? UNKNOWN_SIDE;
+  const saved = c.fit ?? null;
+  let fit: Fit;
+  if (saved !== null && cut.full !== null && cut.box !== null)
+    fit = cropFit(saved, cut.full.w, cut.full.h, cut.box);
+  else if (saved !== null) fit = saved;
+  else if (cut.mask !== null) {
+    const m = cut.mask;
+    fit = guessFit(c.kind, (x, y) => m.data[y * m.w + x] === 1, m.w, m.h);
+  } else fit = DEFAULT_FIT[c.kind] ?? (DEFAULT_FIT.top as Fit);
+  return { id: c.id, kind: c.kind, w, h, fit };
+}
+
+const matrix = (m: Mat) => `matrix(${m.map((v) => Math.round(v * 1e5) / 1e5).join(" ")})`;
+const r2 = (v: number) => Math.round(v * 100) / 100;
+
+/** なめらかな閉じた形 (点を通る曲線)。 */
+function smooth(pts: Pt[]): string {
+  const n = pts.length;
+  const at = (i: number) => pts[(i + n) % n] as Pt;
+  let d = `M${r2(at(0)[0])} ${r2(at(0)[1])}`;
+  for (let i = 0; i < n; i++) {
+    const [p0, p1, p2, p3] = [at(i - 1), at(i), at(i + 1), at(i + 2)];
+    const c1: Pt = [p1[0] + (p2[0] - p0[0]) / 6, p1[1] + (p2[1] - p0[1]) / 6];
+    const c2: Pt = [p2[0] - (p3[0] - p1[0]) / 6, p2[1] - (p3[1] - p1[1]) / 6];
+    d += ` C${r2(c1[0])} ${r2(c1[1])} ${r2(c2[0])} ${r2(c2[1])} ${r2(p2[0])} ${r2(p2[1])}`;
+  }
+  return `${d} Z`;
+}
+
+/** 付け根の幅 w0 から先の幅 w1 へ細くなる、角の丸い棒。 */
+function taper(l: Limb, w0: number, w1: number, extra = 0): string {
+  const dx = l.to[0] - l.from[0];
+  const dy = l.to[1] - l.from[1];
+  const len = Math.hypot(dx, dy) || 1;
+  const ux = dx / len;
+  const uy = dy / len;
+  const end: Pt = [l.to[0] + ux * extra, l.to[1] + uy * extra];
+  const nx = -uy;
+  const ny = ux;
+  const pts: Pt[] = [
+    [l.from[0] + (nx * w0) / 2, l.from[1] + (ny * w0) / 2],
+    [end[0] + (nx * w1) / 2, end[1] + (ny * w1) / 2],
+    [end[0] - (nx * w1) / 2, end[1] - (ny * w1) / 2],
+    [l.from[0] - (nx * w0) / 2, l.from[1] - (ny * w0) / 2],
+  ];
+  return `M${pts.map((p) => `${r2(p[0])} ${r2(p[1])}`).join(" L")} Z`;
+}
+
+/** 棒の途中 (t: 0〜1) を横切る継ぎ目の細い線。 */
+function seam(l: Limb, t: number, w: number): string {
+  const dx = l.to[0] - l.from[0];
+  const dy = l.to[1] - l.from[1];
+  const len = Math.hypot(dx, dy) || 1;
+  const c: Pt = [l.from[0] + dx * t, l.from[1] + dy * t];
+  const nx = (-dy / len) * (w / 2);
+  const ny = (dx / len) * (w / 2);
+  return `M${r2(c[0] + nx)} ${r2(c[1] + ny)} L${r2(c[0] - nx)} ${r2(c[1] - ny)}`;
+}
+
+/** 手・足の先 (棒の先に付く、丸い形)。 */
+function tip(
+  l: Limb,
+  len: number,
+  w: number,
+): { cx: number; cy: number; rx: number; ry: number; rot: number } {
+  const dx = l.to[0] - l.from[0];
+  const dy = l.to[1] - l.from[1];
+  const n = Math.hypot(dx, dy) || 1;
   return {
-    top: `${b.top}%`,
-    left: `${b.left}%`,
-    width: `${b.width}%`,
-    height: b.height === null ? "auto" : `${b.height}%`,
-    // ボトムスの足の裏より下に出る分を隠す (写真は曲げない、評価10)
-    ...(b.clip !== undefined && b.clip > 0 ? { clipPath: `inset(0 0 ${b.clip * 100}% 0)` } : {}),
+    cx: r2(l.to[0] + (dx / n) * (len / 2)),
+    cy: r2(l.to[1] + (dy / n) * (len / 2)),
+    rx: r2(w / 2),
+    ry: r2(len / 2),
+    rot: r2((Math.atan2(-dx, dy) * 180) / Math.PI),
   };
 }
 
-/** 読めた写真の 縦 ÷ 横 (読めるまで null)。切り抜きに替わると読み直す。 */
-function useRatio(): [number | null, (e: SyntheticEvent<HTMLImageElement>) => void] {
-  const [ratio, setRatio] = useState<number | null>(null);
-  const onLoad = (e: SyntheticEvent<HTMLImageElement>) => {
-    const { naturalWidth: w, naturalHeight: h } = e.currentTarget;
-    if (w > 0 && h > 0) setRatio(h / w);
-  };
-  return [ratio, onLoad];
-}
-
-/** 袖を切り分けて腕に沿わせる種類 (#37)。ワンピースは袖なしが多く、裾まで袖の帯に入るので、そのまま。 */
-const SLEEVED = new Set(["top", "outer"]);
-
-/** 測る絵の大きさの上限 (px)。小さく描いて画素を読む。 */
-const MEASURE_SIDE = 96;
-
-/** 読めた写真の、左右の袖の形 (#37)。読めない (canvas がない・読めない) なら null。 */
-function sleevesOf(img: HTMLImageElement): [Sleeve | null, Sleeve | null] | null {
-  const { naturalWidth: nw, naturalHeight: nh } = img;
-  if (nw <= 0 || nh <= 0) return null;
-  const k = Math.min(1, MEASURE_SIDE / Math.max(nw, nh));
-  const w = Math.max(1, Math.round(nw * k));
-  const h = Math.max(1, Math.round(nh * k));
-  try {
-    const cv = document.createElement("canvas");
-    cv.width = w;
-    cv.height = h;
-    const g = cv.getContext("2d");
-    if (g === null) return null;
-    g.drawImage(img, 0, 0, w, h);
-    const px = g.getImageData(0, 0, w, h).data;
-    const a = (x: number, y: number) => (px[(y * w + x) * 4 + 3] ?? 0) > 128;
-    return [measureSleeve(a, w, h), measureSleeve((x, y) => a(w - 1 - x, y), w, h)];
-  } catch {
-    return null;
-  }
-}
-
-/** 服 1 枚。幅で合わせ、縦は写真のまま (曲げない)。ボトムスは丈から幅を決める (#33)。 */
-function Worn({ item: c, open = false }: { item: Clothing; open?: boolean }) {
-  const [ratio, onRatio] = useRatio();
-  const [sleeves, setSleeves] = useState<[Sleeve | null, Sleeve | null] | null>(null);
-  const onLoad = (e: SyntheticEvent<HTMLImageElement>) => {
-    onRatio(e);
-    if (SLEEVED.has(c.kind)) setSleeves(sleevesOf(e.currentTarget));
-  };
-  const b = place(c.kind, ratio);
-  if (b === null) return null;
-  if (SLEEVED.has(c.kind) && ratio !== null) {
-    // 左の袖・身ごろ (アウターで前を開けるなら左右 2 つ)・右の袖に切り分ける。写真は曲げない (#37 #38)
-    const box = { top: b.top, left: b.left, width: b.width, height: b.width * STAGE_RATIO * ratio };
-    const ps = pieces(box, sleeves?.[0] ?? null, sleeves?.[1] ?? null, open && c.kind === "outer");
-    const main = 1; // 身ごろ (左) の片に名前と testid を付ける (読み上げは 1 回だけ)
-    // 袖を先に (下に) 描く: 身ごろの縁と袖の付け根が重なっても、身ごろが上に見える (#44)
-    const order = ps
-      .map((p, i) => ({ p, i }))
-      .sort((a, b) => Number(a.p.turn === 0) - Number(b.p.turn === 0));
-    // 影は服 1 枚分の入れ物に付ける (片ごとに付けると、継ぎ目に縦の線が出る、#47)
-    return (
-      <span className="wear-cut" data-testid="wear-cut" style={{ zIndex: SLOTS[c.kind]?.z }}>
-        {order.map(({ p, i }) => (
-          <span
-            key={i}
-            className="wear-piece"
-            data-testid="piece"
-            data-kind={c.kind}
-            data-turn={p.turn}
-            style={{
-              ...boxStyle(p.box),
-              zIndex: SLOTS[c.kind]?.z,
-              transform: pieceTransform(p),
-              transformOrigin: `${p.origin.x}% ${p.origin.y}%`,
-            }}
-          >
-            <Photo
-              className={`wear wear-${c.kind}`}
-              data-testid={i === main ? "worn" : undefined}
-              data-kind={i === main ? c.kind : undefined}
-              src={api.photoUrl(c.id)}
-              alt={i === main ? c.label || "服" : ""}
-              aria-hidden={i === main ? undefined : true}
-              draggable={false}
-              onLoad={i === main ? onLoad : undefined}
-              style={{
-                top: 0,
-                left: `${(-p.from / (p.to - p.from)) * 100}%`,
-                width: `${100 / (p.to - p.from)}%`,
-                height: "100%",
-              }}
-            />
-          </span>
-        ))}
-      </span>
-    );
-  }
+/** マネキン。顔・髪・指・陰影は描かない (1 色の面と、継ぎ目の細い線だけ)。 */
+export function Mannequin({ d }: { d: Dressed }) {
+  const b: Body = d.body;
+  const torso = smooth([
+    [-b.neckW / 2, b.chin - 1],
+    [-b.neckW / 2, b.shoulderY - 1.5],
+    [-b.shoulder * 0.93, b.shoulderY + 0.5],
+    [-b.chest[1], b.chest[0]],
+    [-b.waist[1], b.waist[0]],
+    [-b.hip[1], b.hip[0]],
+    [-b.hip[1] * 0.75, b.crotch],
+    [0, b.crotch + 1],
+    [b.hip[1] * 0.75, b.crotch],
+    [b.hip[1], b.hip[0]],
+    [b.waist[1], b.waist[0]],
+    [b.chest[1], b.chest[0]],
+    [b.shoulder * 0.93, b.shoulderY + 0.5],
+    [b.neckW / 2, b.shoulderY - 1.5],
+    [b.neckW / 2, b.chin - 1],
+  ]);
+  const headH = b.chin - b.headTop;
   return (
-    <Photo
-      className={`wear wear-${c.kind}`}
-      data-testid="worn"
-      data-kind={c.kind}
-      src={api.photoUrl(c.id)}
-      alt={c.label || "服"}
-      draggable={false}
-      onLoad={onLoad}
-      style={{ ...boxStyle(b), zIndex: SLOTS[c.kind]?.z }}
-    />
+    <g className="mannequin" data-testid="mannequin" transform={matrix(d.pose)}>
+      {d.legs.map((l, i) => {
+        const f = tip(l, b.footLen + 1.5, b.footW * 0.7);
+        return (
+          <g key={`leg${i}`} data-testid="leg" data-angle={r2(l.angle)}>
+            <path className="m-fill" d={taper(l, b.hip[1] * 0.85, 5)} />
+            <ellipse
+              className="m-fill"
+              cx={f.cx}
+              cy={f.cy}
+              rx={f.rx}
+              ry={f.ry}
+              transform={`rotate(${f.rot} ${f.cx} ${f.cy})`}
+            />
+            <path className="m-seam" d={seam(l, 0.52, 9)} />
+            <path className="m-seam" d={seam(l, 1, 5)} />
+          </g>
+        );
+      })}
+      {d.arms.map((l, i) => {
+        const h = tip(l, b.handLen * 0.9, 4.6);
+        return (
+          <g key={`arm${i}`} data-testid="arm" data-angle={r2(l.angle)}>
+            <path className="m-fill" d={taper(l, 7.4, 4)} />
+            <ellipse
+              className="m-fill"
+              cx={h.cx}
+              cy={h.cy}
+              rx={h.rx}
+              ry={h.ry}
+              transform={`rotate(${h.rot} ${h.cx} ${h.cy})`}
+            />
+            <path className="m-seam" d={seam(l, 0.54, 6)} />
+            <path className="m-seam" d={seam(l, 1, 4)} />
+          </g>
+        );
+      })}
+      <path className="m-fill" d={torso} />
+      <path
+        className="m-seam"
+        d={`M${r2(-b.neckW / 2)} ${r2(b.chin + 2)} Q0 ${r2(b.chin + 4)} ${r2(b.neckW / 2)} ${r2(b.chin + 2)}`}
+      />
+      <path
+        className="m-seam"
+        d={`M${r2(-b.waist[1])} ${r2(b.waist[0])} Q0 ${r2(b.waist[0] + 1.5)} ${r2(b.waist[1])} ${r2(b.waist[0])}`}
+      />
+      <ellipse
+        className="m-fill"
+        cx={0}
+        cy={r2(b.headTop + headH / 2)}
+        rx={r2(b.headW / 2)}
+        ry={r2(headH / 2)}
+      />
+    </g>
   );
 }
 
-/**
- * くつ (#32)。2 足を並べた写真を左右の半分に切り分け、それぞれの足に履かせる。
- * 写真は曲げない: 片足の箱は半分の写真と同じ縦横比で、中の写真は箱の 2 倍の幅 (左の足は左半分、右の足は右半分が見える)。
- */
-function Shoes({ item: c }: { item: Clothing }) {
-  const [ratio, onLoad] = useRatio();
-  const z = SLOTS.shoes?.z;
+/** 服 1 枚 (くつは片足ぶん)。写真は曲げず、相似変換だけで置く。 */
+function Garment({ p, c, url, first }: { p: Placed; c: Clothing; url: string; first: boolean }) {
+  const id = useId().replace(/:/g, "");
+  const img = (
+    <image
+      href={url}
+      width={p.w}
+      height={p.h}
+      preserveAspectRatio="none"
+      transform={matrix(p.m)}
+      clipPath={p.half === undefined ? undefined : `url(#${id}h)`}
+      className={`wear wear-${c.kind}`}
+      data-testid={first ? "worn" : undefined}
+      data-kind={first ? c.kind : undefined}
+      data-label={first ? c.label || "服" : undefined}
+      data-foot={p.half}
+    />
+  );
+  const clip = p.clipBelow !== undefined || p.open !== undefined;
   return (
-    <>
-      {shoeFeet(ratio).map((b, i) => (
-        <span
-          key={i}
-          className="wear-foot"
-          data-testid="foot"
-          data-foot={i === 0 ? "left" : "right"}
-          style={{ ...boxStyle(b), zIndex: z }}
+    <g className="wear-g" data-testid={p.half === undefined ? undefined : "foot"} data-foot={p.half}>
+      <defs>
+        {p.half !== undefined && p.split !== undefined && (
+          <clipPath id={`${id}h`} clipPathUnits="userSpaceOnUse">
+            {p.half === "left" ? (
+              <rect x={0} y={0} width={p.split} height={p.h} />
+            ) : (
+              <rect x={p.split} y={0} width={p.w - p.split} height={p.h} />
+            )}
+          </clipPath>
+        )}
+        {clip && (
+          <clipPath id={`${id}c`} clipPathUnits="userSpaceOnUse">
+            {p.open === undefined ? (
+              <rect x={-STAGE.w} y={0} width={STAGE.w * 2} height={p.clipBelow} />
+            ) : (
+              <>
+                <rect x={-STAGE.w} y={0} width={STAGE.w * 2} height={p.open.below} />
+                <rect x={-STAGE.w} y={0} width={STAGE.w + p.open.x - OPEN_GAP} height={STAGE.h} />
+                <rect x={p.open.x + OPEN_GAP} y={0} width={STAGE.w} height={STAGE.h} />
+              </>
+            )}
+          </clipPath>
+        )}
+      </defs>
+      {clip ? (
+        <g
+          clipPath={`url(#${id}c)`}
+          data-testid={p.open !== undefined ? "open" : p.kind === "top" ? "tucked" : "hemmed"}
         >
-          <Photo
-            className="wear wear-shoes"
-            data-testid={i === 0 ? "worn" : undefined}
-            data-kind={i === 0 ? c.kind : undefined}
-            src={api.photoUrl(c.id)}
-            // 同じ写真の右半分は読み上げない (1 足として 1 回だけ)
-            alt={i === 0 ? c.label || "服" : ""}
-            aria-hidden={i === 0 ? undefined : true}
-            draggable={false}
-            onLoad={i === 0 ? onLoad : undefined}
-            style={{ top: 0, left: i === 0 ? 0 : "-100%", width: "200%", height: "100%" }}
-          />
-        </span>
-      ))}
-    </>
+          {img}
+        </g>
+      ) : (
+        img
+      )}
+    </g>
   );
 }
 
@@ -185,17 +270,28 @@ export interface StageProps {
   /** 増えるたびにキラッと光る (0 なら光らない)。 */
   sparkle?: number;
   caption?: string;
-  /** 服の一覧が届くまで (#28): 下着姿を見せず、服の場所に淡い形を出す。 */
+  /** 服の一覧が届くまで (#28): 服の場所に淡い形を出す。 */
   pending?: boolean;
+  /** 服ごとの指の直し・マネキンの指の直し (#83) */
+  adj?: Record<string, Adj>;
+  pose?: Pose;
+  tuck?: boolean;
+  body?: Body;
 }
 
 /** アバターの台。ref は、ドラッグした服を落とす先の判定に使う。 */
 export const Stage = forwardRef<HTMLElement, StageProps>(function Stage(
-  { worn, sparkle = 0, caption = "着ている服", pending = false },
+  { worn, sparkle = 0, caption = "着ている服", pending = false, adj, pose, tuck, body },
   ref,
 ) {
-  // 中にトップスかワンピースを着ていれば、アウターの前を開ける (#38)。何もなければ閉じて下着を見せない
-  const inner = worn.some((c) => c.kind === "top" || c.kind === "dress");
+  const cuts = useCuts(worn);
+  const b = useMemo(() => body ?? makeBody(), [body]);
+  const pieces = worn.flatMap((c) => {
+    const cut = cuts.get(c.id);
+    return cut === undefined ? [] : [pieceOf(c, cut)];
+  });
+  const d = dress(pieces, { body: b, adj, pose, tuck });
+  const byId = new Map(worn.map((c) => [c.id, c]));
   const names = worn.map((c) => c.label || "服").join("・");
   return (
     <figure
@@ -205,11 +301,23 @@ export const Stage = forwardRef<HTMLElement, StageProps>(function Stage(
       aria-label={pending ? `${caption}: 読み込み中` : `${caption}: ${names || "なし"}`}
       aria-busy={pending || undefined}
     >
-      <Body />
+      <svg viewBox={`${-STAGE.w / 2} 0 ${STAGE.w} ${STAGE.h}`} aria-hidden="true" className="stage-svg">
+        <Mannequin d={d} />
+        {d.placed.map((p, i) => {
+          const c = byId.get(p.id) as Clothing;
+          const first = d.placed.findIndex((q) => q.id === p.id) === i;
+          return (
+            <Garment
+              key={`${p.id}${p.half ?? ""}`}
+              p={p}
+              c={c}
+              url={(cuts.get(p.id) as Cut).url}
+              first={first}
+            />
+          );
+        })}
+      </svg>
       {pending && <span className="wear-pending" data-testid="wear-pending" aria-hidden="true" />}
-      {worn.map((c) =>
-        c.kind === "shoes" ? <Shoes key={c.id} item={c} /> : <Worn key={c.id} item={c} open={inner} />,
-      )}
       {sparkle > 0 && (
         <span key={sparkle} className="sparkle" data-testid="sparkle" aria-hidden="true">
           <i />

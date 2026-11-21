@@ -1,6 +1,7 @@
 // 見本の服 (持ち主 2026-11-21「最初に 1 セット、全部の服の種類の例を、本当の写真で入れておいて」)
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { afterEach, expect, test, vi } from "vitest";
+import { ANCHORS } from "../../src/fit";
 
 const sh = vi.hoisted(() => ({ shrinkPhoto: vi.fn() }));
 vi.mock("../../src/shrink", () => sh);
@@ -48,7 +49,18 @@ test("見本を端末で縮めてから、自分の服と同じ道で入れる",
     warmth: SAMPLES[0]?.warmth,
     label: SAMPLES[0]?.label,
     photo: "AAAA",
+    fit: SAMPLES[0]?.fit,
   });
+});
+
+test("AC-81-5: 見本は印を持って入る (種類ごとの印の数、0〜1 の割合。こものは置き場所つき)", () => {
+  for (const s of SAMPLES) {
+    expect(s.fit.p.length).toBeGreaterThanOrEqual(2);
+    expect(s.fit.p.length).toBeLessThanOrEqual(ANCHORS[s.kind]?.length ?? 0);
+    for (const p of s.fit.p) for (const v of p) expect(v >= 0 && v <= 1).toBe(true);
+  }
+  expect(SAMPLES.find((s) => s.kind === "accessory")?.fit.at).toBe("head");
+  expect(SAMPLES.find((s) => s.kind === "bottom")?.fit.p).toHaveLength(4);
 });
 
 test("1 枚入らなくても、ほかの見本は入れる (読めない・縮められない・送れない)", async () => {
