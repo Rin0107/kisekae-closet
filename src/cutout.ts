@@ -20,6 +20,10 @@ export const MIN_KEEP = 0.15;
 /** やり直しの差の下限 (RGB の距離の 2 乗)。むらのない背景でも、これくらいの差は背景とみなす。 */
 export const TIGHT_MIN = 8 * 8 * 3;
 
+/** 服の上の細い突き出し (ハンガーのフック): 1 行の服の画素がこの割合 × 幅 以下で、真ん中 ± HOOK_SPAN × 幅 の中なら外す。 */
+export const HOOK_MAX = 0.1;
+export const HOOK_SPAN = 0.15;
+
 /** 四辺の画素の平均の色と、ばらつき (各色の分散の和)。 */
 function borderStats(px: Uint8ClampedArray, w: number, h: number) {
   const border: number[] = [];
@@ -90,7 +94,24 @@ export function cutout(px: Uint8ClampedArray, w: number, h: number, tol = TOLERA
     const wide = flood(px, w, h, st, tol);
     if (n - wide.count >= n * MIN_KEEP) m = wide;
   }
-  const { bg, count } = m;
+  const { bg } = m;
+  let count = m.count;
+  // 服の上に細く突き出たもの (ハンガーのフック) は外す。上の行から、細くて真ん中にある行だけを背景にし、幅のある行で止める
+  for (let y = 0; y < h; y++) {
+    let c = 0;
+    let lo = w;
+    let hi = -1;
+    for (let x = 0; x < w; x++)
+      if (bg[y * w + x] === 0) {
+        c++;
+        if (x < lo) lo = x;
+        hi = x;
+      }
+    if (c === 0) continue;
+    if (c > w * HOOK_MAX || lo < w * (0.5 - HOOK_SPAN) || hi > w * (0.5 + HOOK_SPAN)) break;
+    for (let x = lo; x <= hi; x++) bg[y * w + x] = 1;
+    count += c;
+  }
   if (count === n) return null;
   let x0 = w;
   let y0 = h;
