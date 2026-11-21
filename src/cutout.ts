@@ -24,6 +24,9 @@ export const TIGHT_MIN = 8 * 8 * 3;
 export const HOOK_MAX = 0.1;
 export const HOOK_SPAN = 0.15;
 
+/** 写真の画素のこの割合より小さい、服から離れたかけら (ごみ・影の点) は消す。 */
+export const MIN_PART = 0.002;
+
 /** 四辺の画素の平均の色と、ばらつき (各色の分散の和)。 */
 function borderStats(px: Uint8ClampedArray, w: number, h: number) {
   const border: number[] = [];
@@ -111,6 +114,29 @@ export function cutout(px: Uint8ClampedArray, w: number, h: number, tol = TOLERA
     if (c > w * HOOK_MAX || lo < w * (0.5 - HOOK_SPAN) || hi > w * (0.5 + HOOK_SPAN)) break;
     for (let x = lo; x <= hi; x++) bg[y * w + x] = 1;
     count += c;
+  }
+  // 服から離れた小さなかけら (背景のごみ・影の点) は消す。服の画素を 4 方向のつながりでかたまりに分け、小さいものを背景にする
+  const seen = new Uint8Array(n);
+  const part = new Int32Array(n);
+  for (let s = 0; s < n; s++) {
+    if (bg[s] === 1 || seen[s] === 1) continue;
+    seen[s] = 1;
+    part[0] = s;
+    let tail = 1;
+    for (let head = 0; head < tail; head++) {
+      const i = part[head] as number;
+      const x = i % w;
+      const next = [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, i - w, i + w];
+      for (const j of next)
+        if (j >= 0 && j < n && bg[j] === 0 && seen[j] === 0) {
+          seen[j] = 1;
+          part[tail++] = j;
+        }
+    }
+    if (tail < n * MIN_PART) {
+      for (let k = 0; k < tail; k++) bg[part[k] as number] = 1;
+      count += tail;
+    }
   }
   if (count === n) return null;
   let x0 = w;
