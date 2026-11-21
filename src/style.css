@@ -1142,3 +1142,20 @@ button:disabled {
     padding-bottom: calc(var(--tap) + var(--sp-3));
   }
 }
+
+/* クローゼットの棚のタブ: しまう欄の種類のチップと同じ、形の絵と名前を 1 列で横に流す (#77) */
+.shelves.chips {
+  flex-wrap: nowrap;
+  scrollbar-width: none;
+}
+.shelves.chips button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-height: var(--tap);
+  padding: 0 var(--sp-3) 0 var(--sp-2);
+}
+.shelves.chips .kind-icon {
+  width: 20px;
+  height: 20px;
+}

@@ -1070,7 +1070,7 @@ function ClosetRoom({
         )}
       </div>
       <h2>クローゼット ({clothes.length})</h2>
-      <div role="tablist" aria-label="服の種類" className="shelves">
+      <div role="tablist" aria-label="服の種類" className="shelves chips">
         {SHELVES.map((s) => (
           <button
             key={s.id}
@@ -1079,7 +1079,8 @@ function ClosetRoom({
             aria-selected={shelf === s.id}
             onClick={() => setShelf(s.id)}
           >
-            {s.name}
+            <KindIcon kind={s.id} />
+            <span>{s.name}</span>
           </button>
         ))}
       </div>
