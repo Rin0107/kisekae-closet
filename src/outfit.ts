@@ -253,10 +253,14 @@ export function bodiceEdge(opaque: (x: number, y: number) => boolean, w: number,
  */
 export const CUT_SAFE = 0.02;
 
+/** 袖の帯の画素の広がりの比 (長い向き ÷ 短い向き の分散) がこれ以上なら細長い袖とみて、向きを主軸で測る。 */
+export const SLEEVE_LONG = 8; // 広げた半袖 (e2e の見本) は約 5、垂れた長袖は 40 前後
+
 /**
  * 切り抜いた写真の不透明な画素 (opaque(x, y)) から、左の袖の切れ目・付け根・向きを測る。
  * 切れ目は身ごろの端 (bodiceEdge) の少し外。付け根は切れ目のすぐ外の列の、一番上から続く不透明な画素 (帯の幅まで) の真ん中。
- * 向きは袖の帯の画素の主軸 (付け根から袖の先へ向けたもの。袖の先の角ではなく袖の軸。広げた T シャツも垂れた長袖も同じに測れる)。
+ * 向きは、帯が細長ければ (SLEEVE_LONG) 袖の帯の画素の主軸 (付け根から袖の先へ向けたもの。垂れた長袖を真下と測る)、
+ * 太く短ければ付け根から袖の重心への向き (半袖の主軸は袖の幅の向きになりうる)。
  * 帯の画素がほとんど全部不透明 (切り抜けていない写真) や、ほとんどない (袖なし) なら null (回さない)。
  * 右の袖は写真を左右反転して同じに測る (opaque に反転したものを渡す)。
  */
@@ -313,14 +317,22 @@ export function measureSleeve(
         yy += (y - cy) ** 2;
         xy += (x - cx) * (y - cy);
       }
-  const th = 0.5 * Math.atan2(2 * xy, xx - yy);
-  let ax = Math.cos(th);
-  let ay = Math.sin(th);
-  if (ax * (cx - edge) + ay * (cy - jy) < 0) {
-    ax = -ax;
-    ay = -ay;
+  // 帯が細長い (垂れた長袖) ときだけ主軸を使う。太く短い帯 (半袖) の主軸は袖の幅の向きになりうるので、
+  // そのときは今までどおり付け根から袖の重心への向き (e2e の見本の半袖を 10 度未満に保つ、AC-44-1)
+  const mid = (xx + yy) / 2;
+  const spread = Math.hypot((xx - yy) / 2, xy);
+  const long = mid - spread <= 0 || (mid + spread) / (mid - spread) >= SLEEVE_LONG;
+  let angle = (Math.atan2(edge - cx, cy - jy) * 180) / Math.PI;
+  if (long) {
+    const th = 0.5 * Math.atan2(2 * xy, xx - yy);
+    let ax = Math.cos(th);
+    let ay = Math.sin(th);
+    if (ax * (cx - edge) + ay * (cy - jy) < 0) {
+      ax = -ax;
+      ay = -ay;
+    }
+    angle = (Math.atan2(-ax, ay) * 180) / Math.PI;
   }
-  const angle = (Math.atan2(-ax, ay) * 180) / Math.PI;
   return { cut: band / w, top: top / h, pivot: jy / h, angle, tip: { x: tip.x / w, y: tip.y / h } };
 }
 
