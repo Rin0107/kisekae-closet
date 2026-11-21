@@ -2,7 +2,7 @@
 // 決まり: D1 には直接触れない (src/worker/db.ts の Store だけを使う。scripts/db-guard.mjs)。入力は全部 zod で検査し、大きさの上限をかける。
 // 利用者 ID は index.ts がセッションから決めて渡す。クライアントから受け取らない。
 import { z } from "zod";
-import { LIMITS, type Store } from "./db";
+import { LIMITS, type Clothing, type Outfit, type Store } from "./db";
 import { checkPhoto } from "./photo";
 import { randomId } from "./session";
 
@@ -15,10 +15,44 @@ const Id = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/);
 const Label = z.string().trim().max(40);
 const Warmth = z.number().int().min(1).max(5);
 
+/** 範囲の数を、小数 digits 桁に丸めて受け取る (保存する文字の長さに上限がつく)。 */
+const num = (min: number, max: number, digits: number) =>
+  z
+    .number()
+    .min(min)
+    .max(max)
+    .transform((x) => Math.round(x * 10 ** digits) / 10 ** digits);
+
+/** 型紙の印 (docs/spec-v2-fitting.md §4)。点は写真の幅・高さに対する割合。置き場所はこものだけ */
+export const FIT_PLACES = ["head", "neck", "hand"] as const;
+export const Fit = z.strictObject({
+  v: z.literal(1),
+  p: z
+    .array(z.tuple([num(0, 1, 4), num(0, 1, 4)]))
+    .min(2)
+    .max(6),
+  at: z.enum(FIT_PLACES).optional(),
+});
+
+/** コーデの中の服の指の直し: [横にずらす cm, 縦にずらす cm, 倍率, 角度 (度)] (§6.1) */
+export const Adj = z.tuple([num(-50, 50, 2), num(-50, 50, 2), num(0.7, 1.4, 3), num(-30, 30, 2)]);
+
+const Limb = num(-90, 90, 2).nullable();
+/** マネキンの指の直し: 倍率・角度・ずらす cm・腕と脚の角度 (真下が 0、外へ正。null は自動) (§6.1) */
+export const Pose = z.strictObject({
+  s: num(0.85, 1.15, 3),
+  r: num(-10, 10, 2),
+  dx: num(-50, 50, 2),
+  dy: num(-50, 50, 2),
+  arm: z.tuple([Limb, Limb]),
+  leg: z.tuple([num(-45, 45, 2).nullable(), num(-45, 45, 2).nullable()]),
+});
+
 export const NewClothingInput = z.object({
   kind: z.enum(KINDS),
   warmth: Warmth,
   label: Label,
+  fit: Fit.optional(),
   photo: z
     .string()
     .max(MAX_PHOTO_BASE64)
@@ -26,8 +60,15 @@ export const NewClothingInput = z.object({
 });
 
 export const ClothingPatchInput = z
-  .object({ kind: z.enum(KINDS).optional(), warmth: Warmth.optional(), label: Label.optional() })
-  .refine((p) => p.kind !== undefined || p.warmth !== undefined || p.label !== undefined);
+  .object({
+    kind: z.enum(KINDS).optional(),
+    warmth: Warmth.optional(),
+    label: Label.optional(),
+    fit: Fit.optional(),
+  })
+  .refine(
+    (p) => p.kind !== undefined || p.warmth !== undefined || p.label !== undefined || p.fit !== undefined,
+  );
 
 export const NewOutfitInput = z
   .object({
@@ -37,9 +78,13 @@ export const NewOutfitInput = z
     tempMin: z.number().min(-60).max(60),
     humidity: z.number().min(0).max(100),
     precip: z.number().min(0).max(2000),
+    adj: z.record(Id, Adj).optional(),
+    pose: Pose.optional(),
   })
   .refine((o) => o.tempMin <= o.tempMax)
-  .refine((o) => new Set(o.itemIds).size === o.itemIds.length);
+  .refine((o) => new Set(o.itemIds).size === o.itemIds.length)
+  // 直しは、そのコーデに入った服にだけ
+  .refine((o) => Object.keys(o.adj ?? {}).every((k) => o.itemIds.includes(k)));
 
 /** 先にコーデを決めておけるのは、今日 (Asia/Tokyo) から何日先まで。画面の canPlan (予報のある日) と同じ */
 export const MAX_DAYS_AHEAD = 15;
@@ -73,6 +118,21 @@ export async function readJson(req: Request): Promise<unknown> {
   }
 }
 
+/** 保存した JSON の文字列を、答えでは値に戻す (書くときに zod で検査済み)。 */
+const parsed = (s: string | null): unknown => (s === null ? null : JSON.parse(s));
+
+function clothingOut<T extends Clothing>(c: T) {
+  return { ...c, fit: parsed(c.fit) };
+}
+
+function outfitOut(o: Outfit) {
+  return {
+    ...o,
+    adj: Object.fromEntries(Object.entries(o.adj).map(([k, v]) => [k, parsed(v)])),
+    pose: parsed(o.pose),
+  };
+}
+
 function fromBase64(s: string): Uint8Array {
   return Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 }
@@ -99,7 +159,7 @@ export const DEFAULT_OUTFITS = 60;
 /** 機能はここに足す。ハンドラーは Store の関数を呼ぶだけ (利用者 ID は c.userId)。 */
 export const ROUTES = new Map<string, Handler>(
   Object.entries({
-    "GET clothes": async (c) => json({ clothes: await c.store.listClothes(c.userId) }),
+    "GET clothes": async (c) => json({ clothes: (await c.store.listClothes(c.userId)).map(clothingOut) }),
     "POST clothes": async (c) => {
       const p = NewClothingInput.safeParse(await readJson(c.req));
       if (!p.success) return bad("服の形が違う");
@@ -108,9 +168,10 @@ export const ROUTES = new Map<string, Handler>(
       if (!check.ok) return bad(check.reason);
       const id = randomId(16);
       const { kind, warmth, label } = p.data;
+      const fit = p.data.fit === undefined ? null : JSON.stringify(p.data.fit);
       const ok = await c.store.addClothing(
         c.userId,
-        { id, kind, warmth, label, photo, photoType: check.type },
+        { id, kind, warmth, label, fit, photo, photoType: check.type },
         c.now,
       );
       return ok ? json({ id }, 201) : bad(`服は ${LIMITS.clothes} 着まで`);
@@ -122,7 +183,9 @@ export const ROUTES = new Map<string, Handler>(
     "PATCH clothes/:id": async (c) => {
       const p = ClothingPatchInput.safeParse(await readJson(c.req));
       if (!p.success) return bad("変える中身の形が違う");
-      return (await c.store.updateClothing(c.userId, c.id, p.data)) ? json({ ok: true }) : notFound();
+      const { fit, ...rest } = p.data;
+      const patch = { ...rest, fit: fit === undefined ? undefined : JSON.stringify(fit) };
+      return (await c.store.updateClothing(c.userId, c.id, patch)) ? json({ ok: true }) : notFound();
     },
     "DELETE clothes/:id": async (c) =>
       (await c.store.deleteClothing(c.userId, c.id)) ? json({ ok: true }) : notFound(),
@@ -130,7 +193,7 @@ export const ROUTES = new Map<string, Handler>(
       // 数でない・範囲の外 (1〜1000) は既定の数
       const n = Number(new URL(c.req.url).searchParams.get("limit"));
       const limit = Number.isInteger(n) && n >= 1 && n <= 1000 ? n : DEFAULT_OUTFITS;
-      return json({ outfits: await c.store.listOutfits(c.userId, limit) });
+      return json({ outfits: (await c.store.listOutfits(c.userId, limit)).map(outfitOut) });
     },
     "POST outfits": async (c) => {
       const p = NewOutfitInput.safeParse(await readJson(c.req));
@@ -138,7 +201,17 @@ export const ROUTES = new Map<string, Handler>(
       // YYYY-MM-DD どうしは文字の順が日付の順
       if (p.data.wornOn > latestDay(c.now)) return bad(`コーデを決めておけるのは ${MAX_DAYS_AHEAD} 日先まで`);
       const id = randomId(16);
-      const r = await c.store.addOutfit(c.userId, { id, ...p.data }, c.now);
+      const { adj, pose, ...rest } = p.data;
+      const r = await c.store.addOutfit(
+        c.userId,
+        {
+          id,
+          ...rest,
+          adj: Object.fromEntries(Object.entries(adj ?? {}).map(([k, v]) => [k, JSON.stringify(v)])),
+          pose: pose === undefined ? null : JSON.stringify(pose),
+        },
+        c.now,
+      );
       if (r === "limit") return bad(`コーデは ${LIMITS.outfits} 件まで`);
       if (r === "unknown-item") return bad("知らない服がある");
       return json({ id }, 201);
@@ -147,10 +220,11 @@ export const ROUTES = new Map<string, Handler>(
       (await c.store.deleteOutfit(c.userId, c.id)) ? json({ ok: true }) : notFound(),
     "GET export": async (c) => {
       const clothes = (await c.store.exportClothes(c.userId)).map(({ photo, ...rest }) => ({
-        ...rest,
+        ...clothingOut(rest),
         photo: toBase64(photo),
       }));
-      return json({ clothes, outfits: await c.store.listOutfits(c.userId, LIMITS.outfits) });
+      const outfits = (await c.store.listOutfits(c.userId, LIMITS.outfits)).map(outfitOut);
+      return json({ clothes, outfits });
     },
   } satisfies Record<string, Handler>),
 );

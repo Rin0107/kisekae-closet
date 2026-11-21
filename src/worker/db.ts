@@ -26,6 +26,8 @@ export interface Clothing {
   kind: string;
   warmth: number;
   label: string;
+  /** 型紙の印 (api.ts が検査した JSON の文字列)。null はまだ印がない */
+  fit: string | null;
   createdAt: number;
 }
 
@@ -34,6 +36,7 @@ export interface NewClothing {
   kind: string;
   warmth: number;
   label: string;
+  fit?: string | null | undefined;
   photo: Uint8Array;
   photoType: string;
 }
@@ -42,6 +45,7 @@ export interface ClothingPatch {
   kind?: string | undefined;
   warmth?: number | undefined;
   label?: string | undefined;
+  fit?: string | undefined;
 }
 
 export interface Outfit {
@@ -52,7 +56,14 @@ export interface Outfit {
   humidity: number;
   precip: number;
   itemIds: string[];
+  /** 服ごとの指の直し (服の ID → api.ts が検査した JSON の文字列)。直していない服は入らない */
+  adj: Record<string, string>;
+  /** マネキンの指の直し (JSON の文字列)。null は直していない */
+  pose: string | null;
 }
+
+/** 足すときは、直しがなければ省ける。 */
+export type NewOutfit = Omit<Outfit, "adj" | "pose"> & Partial<Pick<Outfit, "adj" | "pose">>;
 
 /** D1 の BLOB は、版によって ArrayBuffer・Uint8Array・数の配列で返る。どれでも Uint8Array にする。 */
 export function toBytes(v: unknown): Uint8Array<ArrayBuffer> {
@@ -67,6 +78,7 @@ interface ClothingRow {
   kind: string;
   warmth: number;
   label: string;
+  fit: string | null;
   created_at: number;
 }
 
@@ -77,6 +89,7 @@ interface OutfitRow {
   temp_min: number;
   humidity: number;
   precip: number;
+  pose: string | null;
 }
 
 export class Store {
@@ -193,7 +206,7 @@ export class Store {
   async listClothes(userId: string): Promise<Clothing[]> {
     const { results } = await this.#db
       .prepare(
-        "SELECT id, kind, warmth, label, created_at FROM clothes WHERE user_id = ? ORDER BY created_at, id",
+        "SELECT id, kind, warmth, label, fit, created_at FROM clothes WHERE user_id = ? ORDER BY created_at, id",
       )
       .bind(userId)
       .all<ClothingRow>();
@@ -202,6 +215,7 @@ export class Store {
       kind: r.kind,
       warmth: r.warmth,
       label: r.label,
+      fit: r.fit,
       createdAt: r.created_at,
     }));
   }
@@ -212,9 +226,9 @@ export class Store {
     if (n >= LIMITS.clothes) return false;
     await this.#db
       .prepare(
-        "INSERT INTO clothes (id, user_id, kind, warmth, label, photo, photo_type, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO clothes (id, user_id, kind, warmth, label, fit, photo, photo_type, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
       )
-      .bind(c.id, userId, c.kind, c.warmth, c.label, c.photo, c.photoType, now)
+      .bind(c.id, userId, c.kind, c.warmth, c.label, c.fit ?? null, c.photo, c.photoType, now)
       .run();
     return true;
   }
@@ -233,9 +247,9 @@ export class Store {
   async updateClothing(userId: string, id: string, p: ClothingPatch): Promise<boolean> {
     const r = await this.#db
       .prepare(
-        "UPDATE clothes SET kind = coalesce(?, kind), warmth = coalesce(?, warmth), label = coalesce(?, label) WHERE id = ? AND user_id = ?",
+        "UPDATE clothes SET kind = coalesce(?, kind), warmth = coalesce(?, warmth), label = coalesce(?, label), fit = coalesce(?, fit) WHERE id = ? AND user_id = ?",
       )
-      .bind(p.kind ?? null, p.warmth ?? null, p.label ?? null, id, userId)
+      .bind(p.kind ?? null, p.warmth ?? null, p.label ?? null, p.fit ?? null, id, userId)
       .run();
     return r.meta.changes > 0;
   }
@@ -251,17 +265,21 @@ export class Store {
   async listOutfits(userId: string, limit: number): Promise<Outfit[]> {
     const { results } = await this.#db
       .prepare(
-        "SELECT id, worn_on, temp_max, temp_min, humidity, precip FROM outfits WHERE user_id = ? ORDER BY worn_on DESC, created_at DESC LIMIT ?",
+        "SELECT id, worn_on, temp_max, temp_min, humidity, precip, pose FROM outfits WHERE user_id = ? ORDER BY worn_on DESC, created_at DESC LIMIT ?",
       )
       .bind(userId, limit)
       .all<OutfitRow>();
     const items = await this.#db
-      .prepare("SELECT outfit_id, item_id FROM outfit_items WHERE user_id = ? ORDER BY item_id")
+      .prepare("SELECT outfit_id, item_id, adj FROM outfit_items WHERE user_id = ? ORDER BY item_id")
       .bind(userId)
-      .all<{ outfit_id: string; item_id: string }>();
+      .all<{ outfit_id: string; item_id: string; adj: string | null }>();
     const byOutfit = new Map<string, string[]>();
-    for (const it of items.results)
+    const adjByOutfit = new Map<string, Record<string, string>>();
+    for (const it of items.results) {
       byOutfit.set(it.outfit_id, [...(byOutfit.get(it.outfit_id) ?? []), it.item_id]);
+      if (it.adj !== null)
+        adjByOutfit.set(it.outfit_id, { ...adjByOutfit.get(it.outfit_id), [it.item_id]: it.adj });
+    }
     return results.map((r) => ({
       id: r.id,
       wornOn: r.worn_on,
@@ -270,11 +288,13 @@ export class Store {
       humidity: r.humidity,
       precip: r.precip,
       itemIds: byOutfit.get(r.id) ?? [],
+      adj: adjByOutfit.get(r.id) ?? {},
+      pose: r.pose,
     }));
   }
 
   /** コーデを足す。上限なら "limit"、自分の服でない ID があれば "unknown-item"。 */
-  async addOutfit(userId: string, o: Outfit, now: number): Promise<"ok" | "limit" | "unknown-item"> {
+  async addOutfit(userId: string, o: NewOutfit, now: number): Promise<"ok" | "limit" | "unknown-item"> {
     if ((await this.#count("outfits", userId)) >= LIMITS.outfits) return "limit";
     const marks = o.itemIds.map(() => "?").join(", ");
     const own = await this.#db
@@ -285,13 +305,13 @@ export class Store {
     await this.#db.batch([
       this.#db
         .prepare(
-          "INSERT INTO outfits (id, user_id, worn_on, temp_max, temp_min, humidity, precip, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+          "INSERT INTO outfits (id, user_id, worn_on, temp_max, temp_min, humidity, precip, pose, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
-        .bind(o.id, userId, o.wornOn, o.tempMax, o.tempMin, o.humidity, o.precip, now),
+        .bind(o.id, userId, o.wornOn, o.tempMax, o.tempMin, o.humidity, o.precip, o.pose ?? null, now),
       ...o.itemIds.map((item) =>
         this.#db
-          .prepare("INSERT INTO outfit_items (outfit_id, item_id, user_id) VALUES (?, ?, ?)")
-          .bind(o.id, item, userId),
+          .prepare("INSERT INTO outfit_items (outfit_id, item_id, user_id, adj) VALUES (?, ?, ?, ?)")
+          .bind(o.id, item, userId, o.adj?.[item] ?? null),
       ),
     ]);
     return "ok";
@@ -311,7 +331,7 @@ export class Store {
   ): Promise<(Clothing & { photo: Uint8Array<ArrayBuffer>; photoType: string })[]> {
     const { results } = await this.#db
       .prepare(
-        "SELECT id, kind, warmth, label, created_at, photo, photo_type FROM clothes WHERE user_id = ? ORDER BY created_at, id",
+        "SELECT id, kind, warmth, label, fit, created_at, photo, photo_type FROM clothes WHERE user_id = ? ORDER BY created_at, id",
       )
       .bind(userId)
       .all<ClothingRow & { photo: unknown; photo_type: string }>();
@@ -320,6 +340,7 @@ export class Store {
       kind: r.kind,
       warmth: r.warmth,
       label: r.label,
+      fit: r.fit,
       createdAt: r.created_at,
       photo: toBytes(r.photo),
       photoType: r.photo_type,

@@ -1,4 +1,5 @@
 // Worker の入口と API を、通しで確かめる (D1 はテスト用の SQLite、パスキーの暗号は差し替え)。
+import fc from "fast-check";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 const sw = vi.hoisted(() => ({
@@ -13,6 +14,7 @@ import { latestDay, MAX_BODY_BYTES, readJson } from "../../src/worker/api";
 import { LIMITS } from "../../src/worker/db";
 import worker, { route, type Env } from "../../src/worker/index";
 import { fakeEnv } from "./fake-d1";
+import { runs } from "./fc";
 
 const ORIGIN = "https://closet.example.workers.dev";
 const NOW = 1_800_000_000_000;
@@ -200,7 +202,7 @@ describe("服とコーデ", () => {
     const id = add.body.id as string;
     const list = await call("GET", "/api/clothes", { cookie });
     expect(list.body.clothes).toEqual([
-      { id, kind: "top", warmth: 2, label: "白シャツ", createdAt: expect.any(Number) },
+      { id, kind: "top", warmth: 2, label: "白シャツ", fit: null, createdAt: expect.any(Number) },
     ]);
     const photo = await worker.fetch(req("GET", `/api/clothes/${id}/photo`, { cookie }), env);
     expect(photo.headers.get("Content-Type")).toBe("image/jpeg");
@@ -400,6 +402,7 @@ describe("服とコーデ", () => {
         kind: "top",
         warmth: 2,
         label: "a",
+        fit: null,
         createdAt: expect.any(Number),
         photo: JPEG,
         photoType: "image/jpeg",
@@ -432,6 +435,226 @@ describe("服とコーデ", () => {
     ] as const) {
       expect((await call(m, p, { cookie })).res.status, `${m} ${p}`).toBe(404);
     }
+  });
+});
+
+describe("型紙の印とコーデの直し (#80)", () => {
+  const FIT = {
+    v: 1,
+    p: [
+      [0.2, 0.1],
+      [0.8, 0.1],
+      [0.05, 0.6],
+      [0.95, 0.6],
+    ],
+  };
+  const POSE = { s: 1.05, r: -3, dx: 0, dy: 1.5, arm: [28, null], leg: [null, null] };
+  const outfit = (itemIds: string[], more: Record<string, unknown> = {}) => ({
+    wornOn: "2026-11-15",
+    itemIds,
+    tempMax: 10,
+    tempMin: 5,
+    humidity: 50,
+    precip: 0,
+    ...more,
+  });
+  async function addTop(cookie: string, more: Record<string, unknown> = {}) {
+    const r = await call("POST", "/api/clothes", {
+      cookie,
+      body: { kind: "top", warmth: 2, label: "", photo: JPEG, ...more },
+    });
+    return r.body.id as string;
+  }
+
+  test("AC-80-1: 印を足すとき・変えるときに保存し、一覧と書き出しで値として返す。数は丸める", async () => {
+    const cookie = await signUp();
+    const id = await addTop(cookie, {
+      fit: {
+        ...FIT,
+        p: [
+          [0.123456, 0.1],
+          [0.8, 0.1],
+        ],
+      },
+    });
+    const bare = await addTop(cookie);
+    const fits = async () =>
+      ((await call("GET", "/api/clothes", { cookie })).body.clothes as { fit: unknown }[]).map((c) => c.fit);
+    expect(await fits()).toEqual([
+      {
+        v: 1,
+        p: [
+          [0.1235, 0.1],
+          [0.8, 0.1],
+        ],
+      },
+      null,
+    ]);
+    expect((await call("PATCH", `/api/clothes/${bare}`, { cookie, body: { fit: FIT } })).body).toEqual({
+      ok: true,
+    });
+    expect((await call("PATCH", `/api/clothes/${id}`, { cookie, body: { label: "x" } })).body).toEqual({
+      ok: true,
+    });
+    expect((await fits())[1]).toEqual(FIT);
+    const hat = {
+      v: 1,
+      p: [
+        [0.1, 0.5],
+        [0.9, 0.5],
+      ],
+      at: "head",
+    };
+    await addTop(cookie, { kind: "accessory", fit: hat });
+    expect((await fits())[2]).toEqual(hat);
+    const exp = (await call("GET", "/api/export", { cookie })).body.clothes as { fit: unknown }[];
+    expect(exp.map((c) => c.fit)).toEqual(await fits());
+  });
+
+  test("AC-80-1: 形の違う印は拒む (点の数・範囲・知らない置き場所・知らない欄・版)", async () => {
+    const cookie = await signUp();
+    const bads = [
+      { v: 1, p: [[0.1, 0.1]] },
+      { v: 1, p: Array.from({ length: 7 }, () => [0.5, 0.5]) },
+      {
+        v: 1,
+        p: [
+          [-0.01, 0.1],
+          [0.5, 0.5],
+        ],
+      },
+      {
+        v: 1,
+        p: [
+          [0.1, 1.01],
+          [0.5, 0.5],
+        ],
+      },
+      {
+        v: 1,
+        p: [
+          [0.1, 0.1, 0.1],
+          [0.5, 0.5],
+        ],
+      },
+      { ...FIT, at: "foot" },
+      { ...FIT, note: "x" },
+      { ...FIT, v: 2 },
+      "fit",
+    ];
+    for (const fit of bads) {
+      expect(
+        (
+          await call("POST", "/api/clothes", {
+            cookie,
+            body: { kind: "top", warmth: 2, label: "", photo: JPEG, fit },
+          })
+        ).res.status,
+      ).toBe(400);
+    }
+    const id = await addTop(cookie);
+    for (const fit of bads) {
+      expect((await call("PATCH", `/api/clothes/${id}`, { cookie, body: { fit } })).res.status).toBe(400);
+    }
+  });
+
+  test("AC-80-2: コーデの直しを保存して返す。直していないコーデは {} と null", async () => {
+    const cookie = await signUp();
+    const a = await addTop(cookie);
+    const b = await addTop(cookie, { kind: "bottom" });
+    const add = await call("POST", "/api/outfits", {
+      cookie,
+      body: outfit([a, b], { adj: { [a]: [1.234, -2, 1.05, -4] }, pose: POSE }),
+    });
+    expect(add.res.status).toBe(201);
+    await call("POST", "/api/outfits", { cookie, body: outfit([a], { wornOn: "2026-11-14" }) });
+    const list = (await call("GET", "/api/outfits", { cookie })).body.outfits as {
+      adj: unknown;
+      pose: unknown;
+    }[];
+    expect(list.map((o) => [o.adj, o.pose])).toEqual([
+      [{ [a]: [1.23, -2, 1.05, -4] }, POSE],
+      [{}, null],
+    ]);
+    const exp = (await call("GET", "/api/export", { cookie })).body.outfits;
+    expect(exp).toEqual(list);
+  });
+
+  test("AC-80-2: 形の違う直し・コーデに入っていない服の直しは拒む", async () => {
+    const cookie = await signUp();
+    const a = await addTop(cookie);
+    const other = await addTop(cookie);
+    const bads = [
+      { adj: { [other]: [0, 0, 1, 0] } },
+      { adj: { [a]: [0, 0, 1.5, 0] } },
+      { adj: { [a]: [0, 0, 0.69, 0] } },
+      { adj: { [a]: [0, 0, 1, 31] } },
+      { adj: { [a]: [51, 0, 1, 0] } },
+      { adj: { [a]: [0, 0, 1] } },
+      { adj: { "bad id!": [0, 0, 1, 0] } },
+      { pose: { ...POSE, s: 1.2 } },
+      { pose: { ...POSE, r: 11 } },
+      { pose: { ...POSE, arm: [91, null] } },
+      { pose: { ...POSE, leg: [46, null] } },
+      { pose: { ...POSE, extra: 1 } },
+      { pose: { s: 1 } },
+    ];
+    for (const more of bads) {
+      expect((await call("POST", "/api/outfits", { cookie, body: outfit([a], more) })).res.status).toBe(400);
+    }
+    expect((await call("GET", "/api/outfits", { cookie })).body).toEqual({ outfits: [] });
+  });
+
+  test("AC-80-3: 別の利用者の服の印・コーデの直しは読めない・変えられない", async () => {
+    const a = await signUp();
+    const b = await signUp();
+    const id = await addTop(a, { fit: FIT });
+    await call("POST", "/api/outfits", {
+      cookie: a,
+      body: outfit([id], { adj: { [id]: [0, 0, 1, 5] }, pose: POSE }),
+    });
+    expect(
+      (
+        await call("PATCH", `/api/clothes/${id}`, {
+          cookie: b,
+          body: {
+            fit: {
+              ...FIT,
+              p: [
+                [0, 0],
+                [1, 1],
+              ],
+            },
+          },
+        })
+      ).res.status,
+    ).toBe(404);
+    expect((await call("GET", "/api/clothes", { cookie: b })).body).toEqual({ clothes: [] });
+    expect((await call("GET", "/api/outfits", { cookie: b })).body).toEqual({ outfits: [] });
+    expect((await call("GET", "/api/export", { cookie: b })).body).toEqual({ clothes: [], outfits: [] });
+    const steal = await call("POST", "/api/outfits", {
+      cookie: b,
+      body: outfit([id], { adj: { [id]: [0, 0, 1, 0] } }),
+    });
+    expect(steal.body).toEqual({ error: "知らない服がある" });
+    const mine = (await call("GET", "/api/clothes", { cookie: a })).body.clothes as { fit: unknown }[];
+    expect(mine[0]?.fit).toEqual(FIT);
+  });
+
+  test("AC-80-1 fuzz: でたらめな印は 400 か、範囲の中に丸めて保存される (500 にならない)", async () => {
+    const cookie = await signUp();
+    const id = await addTop(cookie);
+    await fc.assert(
+      fc.asyncProperty(fc.jsonValue(), async (fit) => {
+        const r = await call("PATCH", `/api/clothes/${id}`, { cookie, body: { fit } });
+        expect([200, 400]).toContain(r.res.status);
+      }),
+      runs(),
+    );
+    const fits = ((await call("GET", "/api/clothes", { cookie })).body.clothes as { fit: unknown }[]).map(
+      (c) => c.fit,
+    );
+    expect(fits[0] === null || JSON.stringify(fits[0]).length <= 200).toBe(true);
   });
 });
 
@@ -472,7 +695,9 @@ describe("今日のコーデ", () => {
     expect((await call("GET", "/api/outfits", { cookie: b })).body).toEqual({ outfits: [] });
     expect((await call("DELETE", `/api/outfits/${o}`, { cookie: b })).res.status).toBe(404);
     expect((await call("GET", "/api/export", { cookie: b })).body).toEqual({ clothes: [], outfits: [] });
-    expect((await call("GET", "/api/outfits", { cookie: a })).body).toEqual({ outfits: [{ id: o, ...day }] });
+    expect((await call("GET", "/api/outfits", { cookie: a })).body).toEqual({
+      outfits: [{ id: o, ...day, adj: {}, pose: null }],
+    });
     expect((await call("DELETE", `/api/outfits/${o}`, { cookie: a })).body).toEqual({ ok: true });
   });
 });
