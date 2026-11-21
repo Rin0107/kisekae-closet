@@ -176,3 +176,25 @@ export function fromSaved(
   const days = new Map(saved.days.filter(([d]) => d >= today));
   return days.has(today) ? { days, at: saved.at } : null;
 }
+
+/** 月 (1〜12) ごとの東京の平年に近い天気。天気が読めず前回の予報もないときのおすすめに使う (評価 9)。雨は決めつけない。 */
+const NORMAL: [number, number, number][] = [
+  [10, 2, 55],
+  [11, 2, 55],
+  [14, 5, 55],
+  [19, 10, 65],
+  [23, 15, 65],
+  [26, 19, 75],
+  [30, 23, 75],
+  [31, 24, 75],
+  [27, 21, 75],
+  [22, 15, 65],
+  [17, 9, 55],
+  [12, 4, 55],
+];
+
+export function normalWeather(month: number): Weather {
+  const m = Math.min(12, Math.max(1, Math.round(month) || 1));
+  const [tempMax, tempMin, humidity] = NORMAL[m - 1] as [number, number, number];
+  return { tempMax, tempMin, humidity, precip: 0 };
+}
