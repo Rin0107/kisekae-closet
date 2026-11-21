@@ -3,6 +3,7 @@
 持ち主: **engineer**。設計を変えたら、同じ PR でここを書き直す。
 
 ## ドメインの言葉
+
 - **服** (clothing): 写真・種類 (top / bottom / outer / dress / shoes / accessory)・暖かさ (1〜5)・名前
 - **コーデ** (outfit): ある日に着た服の組と、その日の最高/最低気温・湿度・降水量
 - **おすすめ**: 今日の天気から要る暖かさの合計を決め、手持ちの服から一番近い組を選ぶ (`src/recommend.ts`)
@@ -20,6 +21,7 @@
 - **ボトムスの丈**: 縦長の写真は腰を覆う幅 (`BOTTOM_MIN_WIDTH`) より細くできず丈が伸びる。写真は曲げず、足の裏より下に出る分は clip で下から隠す (`HEM_MAX` = 足の裏の 1% 上、`Box.clip`、評価10)
 
 ## 層と依存の向き
+
 - Worker (`src/worker/`)
   - `index.ts` — 入口。`/api/` の外は静的ファイル (`ASSETS`)。`/api/` は Origin の検査 → ログイン → セッションから利用者 ID → `api.ts`
   - `api.ts` — 利用者の API (機能を足す場所)。`Store` の関数だけを呼ぶ
@@ -35,35 +37,39 @@
   - UI: `App.tsx` (今日・クローゼット・カレンダーの 3 画面と下のタブバー)・`Avatar.tsx` (アバターの台)・`Photo.tsx` (切り抜いた写真)
 
 ## API
-| 方法 | 道 | 中身 |
-| --- | --- | --- |
-| POST | `/api/auth/register/options` | `{displayName?}` → `{challengeId, options}` |
-| POST | `/api/auth/register/verify` | `{challengeId, response}` → Cookie |
-| POST | `/api/auth/login/options` | → `{challengeId, options}` |
-| POST | `/api/auth/login/verify` | `{challengeId, response}` → Cookie |
-| POST | `/api/auth/logout` | Cookie を消す |
-| GET | `/api/me` | `{signedIn: true}` か 401 |
-| DELETE | `/api/account` | アカウントと全データを消す |
-| GET/POST | `/api/clothes` | 一覧 (写真なし) / `{kind, warmth, label, photo(base64)}` |
-| GET | `/api/clothes/:id/photo` | 写真 (本人だけ、no-store) |
-| PATCH/DELETE | `/api/clothes/:id` | `{kind?, warmth?, label?}` / 消す |
-| GET/POST | `/api/outfits` | `?limit=` / `{wornOn, itemIds, tempMax, tempMin, humidity, precip}` |
-| DELETE | `/api/outfits/:id` | 消す |
-| GET | `/api/export` | 服 (写真つき) とコーデの JSON |
+
+| 方法         | 道                           | 中身                                                                |
+| ------------ | ---------------------------- | ------------------------------------------------------------------- |
+| POST         | `/api/auth/register/options` | `{displayName?}` → `{challengeId, options}`                         |
+| POST         | `/api/auth/register/verify`  | `{challengeId, response}` → Cookie                                  |
+| POST         | `/api/auth/login/options`    | → `{challengeId, options}`                                          |
+| POST         | `/api/auth/login/verify`     | `{challengeId, response}` → Cookie                                  |
+| POST         | `/api/auth/logout`           | Cookie を消す                                                       |
+| GET          | `/api/me`                    | `{signedIn: true}` か 401                                           |
+| DELETE       | `/api/account`               | アカウントと全データを消す                                          |
+| GET/POST     | `/api/clothes`               | 一覧 (写真なし) / `{kind, warmth, label, photo(base64)}`            |
+| GET          | `/api/clothes/:id/photo`     | 写真 (本人だけ、no-store)                                           |
+| PATCH/DELETE | `/api/clothes/:id`           | `{kind?, warmth?, label?}` / 消す                                   |
+| GET/POST     | `/api/outfits`               | `?limit=` / `{wornOn, itemIds, tempMax, tempMin, humidity, precip}` |
+| DELETE       | `/api/outfits/:id`           | 消す                                                                |
+| GET          | `/api/export`                | 服 (写真つき) とコーデの JSON                                       |
 
 GET 以外は `Origin` が `env.ORIGIN` と同じときだけ。応答は `Cache-Control: private, no-store`。
 
 ## 仕様との対応
+
 - `spec/Access.tla` の `OwnerOnly` — `tests/unit/db.test.ts`・`worker.test.ts` の `Spec_OwnerOnly`
 - `spec/Access.tla` の `NoExpiredAccess` — `tests/unit/db.test.ts` の `Spec_NoExpiredAccess`
 - `spec/recommend.smt2` — `tests/unit/recommend.test.ts` の PBT (寒いほど下がらない)
 
 ## 配り方
+
 `npm run bundle` が `dist/` (静的) と `bundle/worker.js` (Worker を 1 ファイルに) を作る。
 `wk deploy` がそれと `migrations/` を deploy ブランチに置き、本番の `wrangler.jsonc` (名前・D1 の database_id・ORIGIN) を作る。
 Cloudflare で動くのは版固定の wrangler だけ (工場の書いたコードは鍵のある所で動かない)。
 
 ## 決めたこと
+
 - 2026-11-15 ログインはパスキーだけ (Google 認証は OAuth の secret とメールが付くのでやめた)。持ち主の決定
 - 2026-11-15 服は写真で登録 (持ち主の指定)。R2 は無料でもカードが要るので、D1 に 1 枚 300KB まで
 - 2026-11-17 ラベルは今は服に 1 つ (`clothes.label`)。複数のラベル (labels 表) は migrations の変更なので、要ると分かったら人に頼む
@@ -75,6 +81,7 @@ Cloudflare で動くのは版固定の wrangler だけ (工場の書いたコー
 - 2026-11-21 写真の袖の向き (`measureSleeve` の `angle`) は、付け根から重心へではなく、袖の帯の画素の主軸 (付け根から袖の先へ向けたもの) で測る。真下に垂れた長袖を 0° と測る。ただし帯が細長いとき (分散の比が `SLEEVE_LONG` 8 以上) だけ。太く短い帯 (広げた半袖) の主軸は袖の幅の向きになりうるので、そのときは付け根から重心への向きのまま (e2e AC-44-1 を保つ、試行 1・2 が落ちた理由)
 
 ## 天気が読めないうちに決めたコーデ (#46)
+
 D1 のコーデはその日の気温・湿度・降水量を必ず持つ (migrations は守りの部分で、欄を空にできない)。
 天気が読めないうちに「これに決めた」を押したら、日付と服の ID だけを端末 (`kisekae-closet:pending`) に置き、
 その日の天気が読めたら いつものコーデとして保存して端末から消す (`App.tsx` の `decideLater` と保存の effect)。今日より前のものは捨てる。

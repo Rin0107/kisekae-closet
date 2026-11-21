@@ -147,6 +147,24 @@ function Welcome({ onIn }: { onIn: (notice: string) => void }) {
       <h1>{"kisekae-closet"}</h1>
       {/* prettier-ignore */}
       <p data-testid="goal">{"開くと今日の天気とおすすめを着たアバターが出て、クローゼットから服を引っ張り出して着せ替え、ワンタップで今日のコーデに決められる"}</p>
+      {/* 何をするアプリか一目で分かるように、アバターの絵と 3 つの手順 (#72) */}
+      <div className="welcome-hero">
+        <img src="/avatar/body.webp" alt="" width="100" height="200" />
+        <ol className="steps">
+          <li>
+            <b>撮ってしまう</b>
+            <span>服の写真をクローゼットへ</span>
+          </li>
+          <li>
+            <b>着せる</b>
+            <span>天気に合うコーデがアバターに</span>
+          </li>
+          <li>
+            <b>決める</b>
+            <span>ワンタップで今日のコーデに</span>
+          </li>
+        </ol>
+      </div>
       <p className="muted">ログインはパスキーだけ。パスワードもメールアドレスも要りません。</p>
       <label className="field">
         パスキーの名前 (端末の一覧に出るだけ。保存しません)

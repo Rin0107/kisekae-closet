@@ -1071,3 +1071,66 @@ button:disabled {
 .rack.grid .empty p {
   margin: 0;
 }
+
+/* はじめの画面: アバターの絵と 3 つの手順 (#72) */
+.welcome-hero {
+  display: grid;
+  grid-template-columns: 100px minmax(0, 1fr);
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  border-radius: var(--radius);
+  background: radial-gradient(ellipse at 20% 40%, var(--c-surface) 0%, var(--c-surface-2) 75%);
+}
+.welcome-hero img {
+  width: 100px;
+  height: 200px;
+  object-fit: contain;
+}
+.steps {
+  display: grid;
+  gap: var(--sp-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: step;
+}
+.steps li {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  column-gap: var(--sp-2);
+  counter-increment: step;
+}
+.steps li::before {
+  content: counter(step);
+  grid-row: span 2;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--c-primary-strong);
+  color: var(--c-on-primary);
+  font-weight: 700;
+  font-size: var(--fs-s);
+}
+.steps span {
+  color: var(--c-muted);
+  font-size: var(--fs-s);
+}
+
+/* スマホの幅: 「これに決めた」はタブバーのすぐ上に固定し、スクロールしなくても押せる (#71) */
+@media (max-width: 767px) {
+  .decide-row .decide {
+    position: fixed;
+    left: max(var(--sp-3), env(safe-area-inset-left));
+    right: max(var(--sp-3), env(safe-area-inset-right));
+    bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + var(--sp-2));
+    width: auto;
+    z-index: 15;
+    box-shadow: 0 6px 18px rgb(181 59 94 / 0.28);
+  }
+  .dresser {
+    padding-bottom: calc(var(--tap) + var(--sp-3));
+  }
+}
