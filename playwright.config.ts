@@ -11,7 +11,7 @@ function localChromium(): string | undefined {
   if (process.env.CI || dir === undefined || !existsSync(dir)) return undefined;
   const found = readdirSync(dir)
     .filter((n) => /^chromium-\d+$/.test(n))
-    .sort()
+    .sort((a, b) => Number(a.slice(9)) - Number(b.slice(9)))
     .pop();
   const exe = found === undefined ? "" : join(dir, found, "chrome-linux64", "chrome");
   return existsSync(exe) ? exe : undefined;
