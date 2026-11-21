@@ -10,7 +10,8 @@ import {
   type ReactNode,
 } from "react";
 import { z } from "zod";
-import { Stage } from "./Avatar";
+import { Mannequin, Stage } from "./Avatar";
+import { dress, STAGE } from "./fit";
 import { cutoutOk, forgetCutout } from "./cutout";
 import { KindIcon } from "./KindIcon";
 import { Photo } from "./Photo";
@@ -149,7 +150,9 @@ function Welcome({ onIn }: { onIn: (notice: string) => void }) {
       <p data-testid="goal">{"開くと今日の天気とおすすめを着たアバターが出て、クローゼットから服を引っ張り出して着せ替え、ワンタップで今日のコーデに決められる"}</p>
       {/* 何をするアプリか一目で分かるように、アバターの絵と 3 つの手順 (#72) */}
       <div className="welcome-hero">
-        <img src="/avatar/body.webp" alt="" width="100" height="200" />
+        <svg viewBox={`${-STAGE.w / 2} 0 ${STAGE.w} ${STAGE.h}`} width="100" height="200" aria-hidden="true">
+          <Mannequin d={dress([])} />
+        </svg>
         <ol className="steps">
           <li>
             <b>撮ってしまう</b>

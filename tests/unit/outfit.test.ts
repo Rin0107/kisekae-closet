@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { dressIn, gauge, idealWarmth, SLOTS, takeOff, wear } from "../../src/outfit";
+import { LAYER } from "../../src/fit";
+import { dressIn, gauge, idealWarmth, takeOff, wear } from "../../src/outfit";
 
 const W = { tempMax: 14, tempMin: 8, humidity: 60, precip: 0 }; // 平均 11℃ → 目標 7
 const t1 = { id: "t1", kind: "top", warmth: 2 };
@@ -26,8 +27,8 @@ describe("wear", () => {
     expect(takeOff([t1, b1], "t1")).toEqual([b1]);
     expect(dressIn([t1, b1, o1], ["o1", "gone", "t1"]).map((i) => i.id)).toEqual(["t1", "o1"]);
   });
-  test("どの種類にも台の上の場所がある", () => {
-    for (const k of ["top", "bottom", "outer", "dress", "shoes", "accessory"]) expect(SLOTS[k]).toBeDefined();
+  test("どの種類にも重ねる順がある", () => {
+    for (const k of ["top", "bottom", "outer", "dress", "shoes", "accessory"]) expect(LAYER[k]).toBeDefined();
   });
 });
 

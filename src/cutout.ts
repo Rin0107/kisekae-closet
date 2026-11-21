@@ -197,14 +197,45 @@ async function decode(
   return { img: bmp, w: bmp.width, h: bmp.height, done: () => bmp.close() };
 }
 
-/** 切り抜いた写真の URL と、切り抜けたか (分からないときは true: 知らせない)。 */
-interface Cut {
+/** 印を推し量るために覚えておく、切り抜いた形の大きさの上限 (長辺、px)。 */
+export const MASK_SIDE = 96;
+
+/**
+ * 切り抜いた写真の URL と、切り抜けたか (分からないときは true: 知らせない)。
+ * full は切り抜く前の (縮めた) 写真の大きさ、box はその中の服の箱 (切り詰めた写真の大きさは box.w × box.h)。
+ * mask は切り詰めた写真の形 (服の画素が 1) を MASK_SIDE まで縮めたもの。分からなければ null。
+ */
+export interface Cut {
   url: string;
   ok: boolean;
+  full: { w: number; h: number } | null;
+  box: Box | null;
+  mask: { w: number; h: number; data: Uint8Array } | null;
 }
 
+/** 切り詰めた写真 (px は box の外も含む切り抜く前の全体) の形を、長辺 MASK_SIDE まで縮める。 */
+export function shrinkMask(
+  px: Uint8ClampedArray,
+  w: number,
+  box: Box,
+): { w: number; h: number; data: Uint8Array } {
+  const k = Math.min(1, MASK_SIDE / Math.max(box.w, box.h));
+  const mw = Math.max(1, Math.round(box.w * k));
+  const mh = Math.max(1, Math.round(box.h * k));
+  const data = new Uint8Array(mw * mh);
+  for (let y = 0; y < mh; y++)
+    for (let x = 0; x < mw; x++) {
+      const sx = box.x + Math.min(box.w - 1, Math.floor((x + 0.5) / k));
+      const sy = box.y + Math.min(box.h - 1, Math.floor((y + 0.5) / k));
+      data[y * mw + x] = (px[(sy * w + sx) * 4 + 3] as number) > 0 ? 1 : 0;
+    }
+  return { w: mw, h: mh, data };
+}
+
+const plainCut = (src: string): Cut => ({ url: src, ok: true, full: null, box: null, mask: null });
+
 async function render(src: string): Promise<Cut> {
-  const plain = { url: src, ok: true };
+  const plain = plainCut(src);
   const d = await decode(src);
   if (d === null) return plain;
   const { img } = d;
@@ -226,14 +257,15 @@ async function render(src: string): Promise<Cut> {
   const data = g.getImageData(0, 0, w, h);
   const box = cutout(data.data, w, h);
   const ok = cutoutWorked(data.data, w, h);
-  if (box === null) return { url: src, ok };
+  if (box === null) return { ...plain, ok, full: { w, h } };
   g.putImageData(data, 0, 0);
   const out = document.createElement("canvas");
   out.width = box.w;
   out.height = box.h;
   out.getContext("2d")?.drawImage(c, box.x, box.y, box.w, box.h, 0, 0, box.w, box.h);
   const blob = await new Promise<Blob | null>((done) => out.toBlob(done, "image/png"));
-  return { url: blob === null ? src : URL.createObjectURL(blob), ok };
+  if (blob === null) return { ...plain, ok, full: { w, h } };
+  return { url: URL.createObjectURL(blob), ok, full: { w, h }, box, mask: shrinkMask(data.data, w, box) };
 }
 
 /** 切り抜いた写真を覚えておく数 (最近使ったものから)。追い出したものは blob: を手放す。 */
@@ -247,9 +279,9 @@ function release(src: string, p: Promise<Cut>) {
 }
 
 function cut(src: string): Promise<Cut> {
-  if (typeof createImageBitmap !== "function") return Promise.resolve({ url: src, ok: true });
+  if (typeof createImageBitmap !== "function") return Promise.resolve(plainCut(src));
   let p = cache.get(src);
-  if (p === undefined) p = render(src).catch(() => ({ url: src, ok: true }));
+  if (p === undefined) p = render(src).catch(() => plainCut(src));
   cache.delete(src);
   cache.set(src, p); // 最近使ったものを後ろへ
   while (cache.size > CACHE_SIZE) {
@@ -263,6 +295,11 @@ function cut(src: string): Promise<Cut> {
 /** 切り抜いた写真の URL (blob:)。できない端末・失敗は元の URL。 */
 export function cutoutUrl(src: string): Promise<string> {
   return cut(src).then((c) => c.url);
+}
+
+/** 切り抜いた写真と、その大きさ・箱・形 (着せる位置を決めるため)。 */
+export function cutoutInfo(src: string): Promise<Cut> {
+  return cut(src);
 }
 
 /** 背景を切り抜けたか (#47)。切り抜けない端末・読めない写真は true (知らせない)。 */

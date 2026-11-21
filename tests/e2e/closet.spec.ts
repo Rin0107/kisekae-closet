@@ -247,9 +247,8 @@ test("AC-7-5 AC-9-2 AC-22-3 AC-25-1 AC-25-2 AC-27-3 AC-28-1 AC-28-2 AC-29-2 AC-3
   await page.getByRole("navigation", { name: "画面" }).getByRole("button", { name: "今日" }).click();
   const stage = page.getByTestId("stage");
   await expect(stage.getByTestId("worn")).not.toHaveCount(0);
-  // AC-22-3: 体の絵 (自分の origin の WebP) が読めている
-  const body = stage.locator("img.body");
-  await expect.poll(() => body.evaluate((i: HTMLImageElement) => i.complete && i.naturalWidth)).toBe(400);
+  // AC-82-1: マネキン (repo の中の SVG) が出ている
+  await expect(stage.getByTestId("mannequin")).toBeVisible();
   const size = await stage.boundingBox();
   await page.screenshot({ path: shot("today") });
 
@@ -266,15 +265,15 @@ test("AC-7-5 AC-9-2 AC-22-3 AC-25-1 AC-25-2 AC-27-3 AC-28-1 AC-28-2 AC-29-2 AC-3
   // 台の見えているところ (下のほう) に落とす
   await page.mouse.move(to.x + to.width / 2, Math.max(to.y + 10, to.y + to.height - 60), { steps: 8 });
   await page.mouse.up();
-  await expect(stage.getByRole("img", { name: "ピンクニット" })).toBeAttached();
+  await expect(stage.locator('[data-testid="worn"][data-label="ピンクニット"]')).toBeAttached();
   await expect(page.getByTestId("sparkle")).toBeAttached();
   // AC-45-1 AC-45-2: 着ている服をもう一度タップすると脱げ、また押すと着る
   await expect(knit).toHaveAttribute("aria-pressed", "true");
   await knit.click();
-  await expect(stage.getByRole("img", { name: "ピンクニット" })).toHaveCount(0);
+  await expect(stage.locator('[data-testid="worn"][data-label="ピンクニット"]')).toHaveCount(0);
   await expect(knit).toHaveAttribute("aria-pressed", "false");
   await knit.click();
-  await expect(stage.getByRole("img", { name: "ピンクニット" })).toBeAttached();
+  await expect(stage.locator('[data-testid="worn"][data-label="ピンクニット"]')).toBeAttached();
   const after = await stage.boundingBox();
   expect([after?.width, after?.height]).toEqual([size?.width, size?.height]); // 台の大きさは変わらない
   await page.evaluate(() => window.scrollTo(0, 0));
@@ -285,39 +284,36 @@ test("AC-7-5 AC-9-2 AC-22-3 AC-25-1 AC-25-2 AC-27-3 AC-28-1 AC-28-2 AC-29-2 AC-3
   const sneaker = page.getByRole("button", { name: "スニーカーを着る" });
   if ((await sneaker.getAttribute("aria-pressed")) !== "true") await sneaker.click();
   await expect(sneaker).toHaveAttribute("aria-pressed", "true");
-  const feet = await stage.getByTestId("foot").evaluateAll((els) =>
-    els.map((e) => {
-      const s = (e.parentElement as HTMLElement).getBoundingClientRect();
-      const b = e.getBoundingClientRect();
-      return { cx: (b.left + b.width / 2 - s.left) / s.width, bottom: (b.bottom - s.top) / s.height };
-    }),
-  );
+  // AC-84-1: くつの片は、マネキンの左右の足の真下
+  const rel = (sel: string) =>
+    stage.locator(sel).evaluateAll((els) =>
+      els.map((e) => {
+        const s = (e.closest("figure") as HTMLElement).getBoundingClientRect();
+        const b = e.getBoundingClientRect();
+        return { cx: (b.left + b.width / 2 - s.left) / s.width, bottom: (b.bottom - s.top) / s.height };
+      }),
+    );
+  const feet = await rel('[data-testid="foot"]');
+  const legs = await rel('[data-testid="leg"]');
   expect(feet).toHaveLength(2);
-  expect(feet[0]?.cx).toBeGreaterThan(0.23);
-  expect(feet[0]?.cx).toBeLessThan(0.33);
-  expect(feet[1]?.cx).toBeGreaterThan(0.67);
-  expect(feet[1]?.cx).toBeLessThan(0.77);
-  for (const f of feet) expect(f.bottom).toBeGreaterThan(0.9);
-  // AC-33-1: 長いパンツの裾は足首の近くまで (台の 85% より下)
-  const hem = await stage.getByRole("img", { name: "デニム" }).evaluate((i) => {
-    const s = (i.parentElement as HTMLElement).getBoundingClientRect();
-    return (i.getBoundingClientRect().bottom - s.top) / s.height;
-  });
-  expect(hem).toBeGreaterThan(0.85);
-  // AC-37-1: トップスは袖・身ごろ・袖に切り分けられ、写真を測って、袖の先が腕の外の線に来るように左右対称に回る
-  // (見本の半袖は袖が横に張り出しているので、少し内へ回る。真っすぐ垂れた長袖なら外へ回る: 単体テスト)
-  const top = stage.locator('[data-testid="piece"][data-kind="top"]');
-  await expect(top).toHaveCount(3);
-  await expect.poll(() => top.first().getAttribute("data-turn").then(Number)).not.toBe(0);
-  const turns = await top.evaluateAll((els) => els.map((e) => Number(e.getAttribute("data-turn"))));
-  // AC-44-3: 袖は身ごろより先に (下に) 描く: 左の袖・右の袖・身ごろ (回さない) の順
-  expect(turns[2]).toBe(0);
-  // 左右は写真の画素の丸めの分 (1 度未満) だけずれてよい
-  expect(Math.abs((turns[1] ?? 0) + (turns[0] ?? 0))).toBeLessThan(1);
-  // AC-44-1 AC-44-3: 見本の半袖は、袖の向きがもともと腕に近いので、ほとんど回さない (翼のように張り出さない)。
-  // 服 1 枚分の影の入れ物に入っている (目で見る絵は下の avatar.png)
-  expect(Math.abs(turns[0] ?? 99)).toBeLessThan(10);
-  await expect(stage.getByTestId("wear-cut")).not.toHaveCount(0);
+  for (const [i, f] of feet.entries()) {
+    expect(Math.abs((f.cx ?? 0) - (legs[i]?.cx ?? 9))).toBeLessThan(0.08);
+    expect(f.bottom).toBeGreaterThan(0.85);
+  }
+  expect(feet[0]?.cx).toBeLessThan(0.5);
+  expect(feet[1]?.cx).toBeGreaterThan(0.5);
+  // AC-33-1 (v2): パンツの丈は写真の縦横比のまま (ウエスト 36cm を腰に重ねる)。描いたデニムは
+  // ウエスト 140px・丈 270px なので、裾は 腰 (74cm) + 36 × 270 / 140 cm ≈ 台の 80%。長いパンツほど下へ届く
+  const hem = await rel('[data-testid="worn"][data-label="デニム"]');
+  expect(hem[0]?.bottom).toBeGreaterThan((74 + (36 * 270) / 140) / 180 - 0.03);
+  expect(hem[0]?.bottom).toBeLessThan((74 + (36 * 270) / 140) / 180 + 0.03);
+  // AC-82-3: 写真は切らずに 1 枚のまま。腕は袖口の向きに左右対称に開く (袖を回すのはやめた、v2)
+  await expect(stage.locator('[data-testid="worn"][data-kind="top"]')).toHaveCount(1);
+  const angles = await stage
+    .getByTestId("arm")
+    .evaluateAll((els) => els.map((e) => Number(e.getAttribute("data-angle"))));
+  expect(angles).toHaveLength(2);
+  expect(Math.abs((angles[0] ?? 0) - (angles[1] ?? 99))).toBeLessThan(3);
 
   await page.getByRole("button", { name: "これに決めた" }).click();
   await expect(page.getByTestId("stamp")).toBeVisible();
@@ -338,8 +334,8 @@ test("AC-7-5 AC-9-2 AC-22-3 AC-25-1 AC-25-2 AC-27-3 AC-28-1 AC-28-2 AC-29-2 AC-3
   if (stampBox === null) throw new Error("スタンプがない");
   const covers = [
     ...(await stage.getByTestId("foot").all()),
-    stage.getByRole("img", { name: "デニム" }),
-    stage.locator('[data-testid="piece"][data-kind="top"][data-turn="0"]'),
+    stage.locator('[data-testid="worn"][data-label="デニム"]'),
+    stage.locator('[data-testid="worn"][data-kind="top"]'),
   ];
   for (const c of covers) {
     const b = await c.boundingBox();
@@ -408,7 +404,7 @@ test("AC-7-5 AC-9-2 AC-22-3 AC-25-1 AC-25-2 AC-27-3 AC-28-1 AC-28-2 AC-29-2 AC-3
   await page.getByRole("button", { name: "この日のコーデを決める" }).click();
   await expect(page.getByTestId("plan-bar")).toContainText(`${ahead.getMonth() + 1}月${ahead.getDate()}日`);
   await expect(page.getByTestId("weather")).toHaveText("9℃ / 3℃・湿度 85%・雨 4mm");
-  await expect(stage.getByRole("img", { name: "トレンチ" })).toBeAttached(); // 寒い日はアウターまで
+  await expect(stage.locator('[data-testid="worn"][data-label="トレンチ"]')).toBeAttached(); // 寒い日はアウターまで
   await page.getByRole("button", { name: "これに決めた" }).click();
   await expect(page.getByTestId("stamp")).toBeVisible();
   await page.getByRole("button", { name: "今日に戻る" }).click();
