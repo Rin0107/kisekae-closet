@@ -23,6 +23,7 @@
 - 利用者のデータを消してしまったときに戻す手段は持たない (バックアップに個人のデータを置かない)。だから消す処理は db.ts の決まった関数だけ
 
 ## テストの体制
+- 手元 (NixOS) では、CI でなければ PLAYWRIGHT_BROWSERS_PATH の chromium を使う (npm の Playwright と版がずれても `npm run e2e` が動く、#75)
 - e2e はまず iphone (iPhone 13 の大きさ 390×664・タッチ・モバイル、chromium) で、次に広い画面 (Desktop Chrome、1280) で走る (`playwright.config.ts` の projects。持ち主 Rin0107/kisekae-closet-archive#49「スマホ最優先、テストは必ずスマホ幅で」)
 - 認可: 別の利用者からは届かないことを `tests/unit/db.test.ts`・`worker.test.ts`・`routes.test.ts` で (Spec_OwnerOnly)
 - D1 は `tests/unit/fake-d1.ts` (Node の SQLite に migrations を流したもの)

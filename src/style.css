@@ -642,14 +642,22 @@ input {
   outline: 2px solid var(--c-primary-strong);
   outline-offset: 2px;
 }
+/* 暖かさ: 種類のチップ (#38) と同じく、1 列で横に流れる (#74) */
 .warmth {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow-x: auto;
   align-items: center;
   gap: var(--sp-1);
+  padding-bottom: var(--sp-1);
   font-size: var(--fs-s);
+  scrollbar-width: none;
+}
+.warmth > span {
+  flex: none;
 }
 .warmth button {
+  flex: none;
   display: inline-flex;
   flex-direction: column;
   align-items: center;
