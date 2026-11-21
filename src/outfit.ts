@@ -73,11 +73,15 @@ export interface Box {
   left: number;
   width: number;
   height: number | null;
+  /** 写真の高さのうち、下から隠す割合 (0〜1)。無ければ隠さない */
+  clip?: number;
 }
 
 /** ボトムスの幅の範囲 (%)。下は腰の下着を覆う幅 (写真の幅の 3/4 が腰)、上は太く見えすぎない幅。 */
 export const BOTTOM_MIN_WIDTH = 46;
 export const BOTTOM_MAX_WIDTH = 60;
+/** 見えるボトムスの裾の下限 (%)。足の裏の 1% 上 (くつの中に隠れる、評価10) */
+export const HEM_MAX = BODY.sole - 1;
 
 /**
  * 服を置く箱。ratio は写真の 縦 ÷ 横 (分からなければ null)。
@@ -90,7 +94,11 @@ export function place(kind: string, ratio: number | null): Box | null {
   if (kind === "bottom" && ratio !== null && ratio > 0) {
     const want = (BODY.ankle - s.top) / (STAGE_RATIO * ratio);
     const width = Math.min(BOTTOM_MAX_WIDTH, Math.max(BOTTOM_MIN_WIDTH, want));
-    return { top: s.top, left: 50 - width / 2, width, height: null };
+    const box: Box = { top: s.top, left: 50 - width / 2, width, height: null };
+    // 縦長の写真は腰を覆う幅より細くできず丈が伸びる。写真は曲げず、足の裏より下に出る分を下から隠す (評価10)
+    const height = width * STAGE_RATIO * ratio;
+    const end = s.top + height;
+    return end > HEM_MAX ? { ...box, clip: (end - HEM_MAX) / height } : box;
   }
   return { top: s.top, left: s.left, width: s.width, height: s.fit === "box" ? s.height : null };
 }

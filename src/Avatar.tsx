@@ -31,6 +31,8 @@ function boxStyle(b: Box) {
     left: `${b.left}%`,
     width: `${b.width}%`,
     height: b.height === null ? "auto" : `${b.height}%`,
+    // ボトムスの足の裏より下に出る分を隠す (写真は曲げない、評価10)
+    ...(b.clip !== undefined && b.clip > 0 ? { clipPath: `inset(0 0 ${b.clip * 100}% 0)` } : {}),
   };
 }
 
