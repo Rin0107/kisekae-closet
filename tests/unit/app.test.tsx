@@ -560,6 +560,45 @@ describe("クローゼットから着せる", () => {
   });
 });
 
+describe("インする・体型 (#84)", () => {
+  test("AC-84-3: トップスとボトムスを着ていれば「インする」が出て、押すとトップスの腰より下を隠す", async () => {
+    const el = await render();
+    const tuck = button(el, "インする");
+    expect(tuck).toBeDefined();
+    expect(tuck?.getAttribute("aria-pressed")).toBe("false");
+    await click(tuck);
+    expect(button(el, "インする")?.getAttribute("aria-pressed")).toBe("true");
+    expect(el.querySelector('[data-testid="stage"] [data-testid="tucked"]')).not.toBeNull();
+  });
+
+  test("AC-84-5: 設定で体型 (身長・体格) を選ぶと、端末にだけ置いて、マネキンが変わる", async () => {
+    const el = await render();
+    const leg = () => el.querySelector('[data-testid="stage"] [data-testid="leg"] path')?.getAttribute("d");
+    const before = leg();
+    await click(button(el, "クローゼット"));
+    if (button(el, "設定")?.getAttribute("aria-expanded") !== "true") await click(button(el, "設定"));
+    await click(button(el, "170cm"));
+    await click(button(el, "しっかり"));
+    expect(JSON.parse(localStorage.getItem("kisekae-closet:body") ?? "null")).toEqual({
+      height: 170,
+      build: "sturdy",
+    });
+    expect(button(el, "170cm")?.getAttribute("aria-pressed")).toBe("true");
+    await click(button(el, "今日"));
+    expect(leg()).not.toBe(before);
+    expect(calls.some((c) => c.includes("body"))).toBe(false);
+  });
+
+  test("AC-83-1: 「指で直す」で全画面の直す画面が開き、「できた」で閉じる", async () => {
+    const el = await render();
+    await click(button(el, "指で直す"));
+    expect(el.querySelector('[data-testid="edit-stage"]')).not.toBeNull();
+    expect(el.querySelector('[data-testid="edit-stage"]')?.getAttribute("role")).toBe("dialog");
+    await click(button(el, "できた"));
+    expect(el.querySelector('[data-testid="edit-stage"]')).toBeNull();
+  });
+});
+
 describe("服をしまう", () => {
   const pickFile = async (el: HTMLElement, files: File[] | null) => {
     const input = el.querySelector('input[type="file"]') as HTMLInputElement;

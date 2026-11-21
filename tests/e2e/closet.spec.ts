@@ -502,3 +502,74 @@ test("見本: 新しいアカウントには 6 種類の見本の服が 1 枚ず
   expect(body.fit.p).toHaveLength(4);
   await expect(page.getByTestId("refit")).toHaveCount(0);
 });
+
+test("AC-83-1 AC-83-2 AC-83-5 AC-83-6: 台をタップすると全画面で直せる。2 本指で広げると服が大きくなり、決めるとコーデと一緒に保存される", async ({
+  page,
+  baseURL,
+}) => {
+  test.skip(baseURL?.startsWith("https://") === true, "本番・プレビューにはアカウントを作らない");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await authenticator(page);
+  await page.route("https://api.open-meteo.com/**", (r) => r.fulfill({ json: forecast(new Date()) }));
+  await page.goto("./");
+  await page.getByRole("button", { name: "はじめる" }).click();
+  const stage = page.getByTestId("stage");
+  await expect(stage.getByTestId("worn")).not.toHaveCount(0);
+  await page.getByRole("button", { name: "指で直す", exact: true }).click();
+  const edit = page.getByTestId("edit-stage");
+  await expect(edit).toBeVisible();
+  // AC-83-6: 2 本指でページが拡大・スクロールしない
+  await expect(edit.getByTestId("edit-layer")).toHaveCSS("touch-action", "none");
+  const layer = await edit.getByTestId("edit-layer").boundingBox();
+  if (layer === null) throw new Error("台がない");
+  // 胸のあたり (服がある) をタップして選ぶ
+  const cx = layer.x + layer.width / 2;
+  const cy = layer.y + layer.height * 0.3;
+  await page.mouse.click(cx, cy);
+  await expect(edit.getByTestId("edit-name")).toBeVisible();
+  const kind = await edit.getByTestId("edit-sel").count();
+  expect(kind).toBeGreaterThan(0);
+  const name = await edit.getByTestId("edit-name").textContent();
+  const img = edit.locator(`[data-testid="worn"][data-label="${name}"]`);
+  const width = async () => (await img.boundingBox())?.width ?? 0;
+  const w0 = await width();
+  // 2 本指で広げる (CDP のタッチ)
+  const cdp = await page.context().newCDPSession(page);
+  const touch = (type: "touchStart" | "touchMove" | "touchEnd", d: number) =>
+    cdp.send("Input.dispatchTouchEvent", {
+      type,
+      touchPoints:
+        type === "touchEnd"
+          ? []
+          : [
+              { x: cx - d, y: cy, id: 1 },
+              { x: cx + d, y: cy, id: 2 },
+            ],
+    });
+  await touch("touchStart", 20);
+  for (const d of [30, 40, 50]) await touch("touchMove", d);
+  await touch("touchEnd", 0);
+  await expect.poll(width).toBeGreaterThan(w0 * 1.3);
+  // AC-83-7: ボタンでも少しずつ
+  await edit.getByRole("button", { name: "左へ" }).click();
+  await edit.getByRole("button", { name: "できた" }).click();
+  await expect(edit).toHaveCount(0);
+  // 台の上でも大きいまま
+  const small = await stage.locator(`[data-testid="worn"][data-label="${name}"]`).boundingBox();
+  expect(small?.width ?? 0).toBeGreaterThan(0);
+  // AC-83-5: 決めると、直しをコーデと一緒に送る
+  const sent = page.waitForRequest((r) => r.url().endsWith("/api/outfits") && r.method() === "POST");
+  await page.getByRole("button", { name: "これに決めた" }).click();
+  const body = (await sent).postDataJSON() as { adj?: Record<string, number[]> };
+  const adj = Object.values(body.adj ?? {})[0];
+  expect(adj?.[2]).toBeGreaterThan(1.3);
+  expect(adj?.[0]).toBeLessThan(0);
+  // 開き直しても、決めたコーデは直したまま
+  const before = await stage.locator(`[data-testid="worn"][data-label="${name}"]`).getAttribute("transform");
+  await page.reload();
+  await expect(stage.locator(`[data-testid="worn"][data-label="${name}"]`)).toHaveAttribute(
+    "transform",
+    before ?? "",
+  );
+  await expect(page.getByTestId("stamp")).toBeVisible();
+});

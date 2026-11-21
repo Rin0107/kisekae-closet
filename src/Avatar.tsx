@@ -2,7 +2,7 @@
 // 切り抜いた服の写真を「印 2 点を体の 2 点に重ねる相似変換」だけで重ねる (曲げない・切らない)。
 // マネキンのほうが服に合わせる: 腕は一番外の服の袖口へ、脚はボトムスの裾へ向く (src/fit.ts の dress)。
 // 台の大きさは CSS で固定 (--stage-w・--stage-h)。中は cm の世界 (viewBox が STAGE)。
-import { forwardRef, useEffect, useId, useMemo, useState } from "react";
+import { forwardRef, useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import { api, type Clothing } from "./client";
 import { cutoutInfo, type Cut } from "./cutout";
 import {
@@ -265,6 +265,24 @@ function Garment({ p, c, url, first }: { p: Placed; c: Clothing; url: string; fi
   );
 }
 
+export interface Look {
+  adj?: Record<string, Adj> | undefined;
+  pose?: Pose | undefined;
+  tuck?: boolean | undefined;
+  body?: Body | undefined;
+}
+
+/** 着た服の切り抜きを読み、マネキンと服の置き方を決める。 */
+export function useDressed(worn: Clothing[], { adj, pose, tuck, body }: Look) {
+  const cuts = useCuts(worn);
+  const b = useMemo(() => body ?? makeBody(), [body]);
+  const pieces = worn.flatMap((c) => {
+    const cut = cuts.get(c.id);
+    return cut === undefined ? [] : [pieceOf(c, cut)];
+  });
+  return { d: dress(pieces, { body: b, adj, pose, tuck }), cuts };
+}
+
 export interface StageProps {
   worn: Clothing[];
   /** 増えるたびにキラッと光る (0 なら光らない)。 */
@@ -277,20 +295,18 @@ export interface StageProps {
   pose?: Pose;
   tuck?: boolean;
   body?: Body;
+  /** 台の大きさ (px)。指で直すときの大きな台だけ。ふつうは CSS の変数で固定 */
+  size?: { w: number; h: number };
+  /** 台の上に重ねるもの (指で直すときの選んだ印) */
+  children?: ReactNode;
 }
 
 /** アバターの台。ref は、ドラッグした服を落とす先の判定に使う。 */
 export const Stage = forwardRef<HTMLElement, StageProps>(function Stage(
-  { worn, sparkle = 0, caption = "着ている服", pending = false, adj, pose, tuck, body },
+  { worn, sparkle = 0, caption = "着ている服", pending = false, adj, pose, tuck, body, size, children },
   ref,
 ) {
-  const cuts = useCuts(worn);
-  const b = useMemo(() => body ?? makeBody(), [body]);
-  const pieces = worn.flatMap((c) => {
-    const cut = cuts.get(c.id);
-    return cut === undefined ? [] : [pieceOf(c, cut)];
-  });
-  const d = dress(pieces, { body: b, adj, pose, tuck });
+  const { d, cuts } = useDressed(worn, { adj, pose, tuck, body });
   const byId = new Map(worn.map((c) => [c.id, c]));
   const names = worn.map((c) => c.label || "服").join("・");
   return (
@@ -300,6 +316,7 @@ export const Stage = forwardRef<HTMLElement, StageProps>(function Stage(
       data-testid="stage"
       aria-label={pending ? `${caption}: 読み込み中` : `${caption}: ${names || "なし"}`}
       aria-busy={pending || undefined}
+      style={size === undefined ? undefined : { width: size.w, height: size.h }}
     >
       <svg viewBox={`${-STAGE.w / 2} 0 ${STAGE.w} ${STAGE.h}`} aria-hidden="true" className="stage-svg">
         <Mannequin d={d} />
@@ -316,6 +333,7 @@ export const Stage = forwardRef<HTMLElement, StageProps>(function Stage(
             />
           );
         })}
+        {children}
       </svg>
       {pending && <span className="wear-pending" data-testid="wear-pending" aria-hidden="true" />}
       {sparkle > 0 && (

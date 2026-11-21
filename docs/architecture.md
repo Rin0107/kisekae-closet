@@ -18,6 +18,7 @@
 - **写真の送り方**: 端末で送る前に Exif・XMP・IPTC を落とす (iPhone の Safari の JPEG は canvas から書いても Exif が付くため。src/shrink.ts の stripMetadata)
 - **切り抜き**: 表示するときに端末で、写真の四辺につながった背景の色を透明にして服に切り詰める (`src/cutout.ts`)。サーバーには元の写真だけ。まず背景のむらから決めた狭い差でたどり (白い壁の前の淡い色の服を消さない)、背景がほとんど消えなければ (むらのある床など) 広い差でやり直す (#27、Rin0107/kisekae-closet-archive#49)。選んだばかりの写真 (blob:) は fetch せず <img> で読む (CSP の connect-src に blob: を足さない、#25)。服の上の細い突き出し (ハンガーのフック) は外す。服から離れた小さなかけらは消す (`MIN_PART`)。四辺が白い写真 (型紙合わせで背景を白にして送ったもの、#81) は、服に囲まれた大きな白 (`MIN_HOLE` 以上) も背景にする
 - **型紙の印** (`fit`、#80): 服そのものの印 (肩先・袖口・ウエスト・裾・くつの底の端・こものの両端と置き場所)。写真の幅・高さに対する割合。印のない服は、切り抜いた形から推し量る (`fit.ts` の `guessFit`)。保存した写真の上の印を、切り詰めた写真の上に直して使う (`cropFit`)
+- **指の直し** (#83): 服ごとの直し (`Adj`: ずらす cm・倍率・角度) は `outfit_items.adj`、マネキンの直し (`Pose`) は `outfits.pose`。コーデごとに覚える (服の欄には置かない)。範囲は `gesture.ts` とサーバーの zod で同じ
 - **着せる** (着せ替え v2、`docs/spec-v2-fitting.md`): `fit.ts` の `dress`。台は cm の世界。服は印 2 点を体の 2 点に重ねる相似変換だけ (曲げない)。マネキンの腕・脚は服に合わせて動く。床より長い裾は床で隠す
 
 ## 層と依存の向き
@@ -33,7 +34,7 @@
   - 決まり (純粋な関数): `theme.ts` (色の組・コントラスト)・`recommend.ts`・`outfit.ts` (着せ替え・ゲージ)・`calendar.ts` (月のマス・天気の近さ)・`fit.ts` (cm の幾何・印・着せる)・`cutout.ts` の `cutout`・`weather.ts`・`shrink.ts` の `fitSize`/`encodeSmall`
   - 通信: `client.ts` (zod で答えを検査)・`passkey.ts` (@simplewebauthn/browser)
   - 端末の保存: `storage.ts` (選んだ市とテーマだけ)
-  - UI: `App.tsx` (今日・クローゼット・カレンダーの 3 画面と下のタブバー)・`FitEditor.tsx` (型紙合わせ。決まりは `fitEditor.ts`)・`Avatar.tsx` (アバターの台: マネキンと服の SVG)・`Photo.tsx` (切り抜いた写真)
+  - UI: `App.tsx` (今日・クローゼット・カレンダーの 3 画面と下のタブバー)・`FitEditor.tsx` (型紙合わせ。決まりは `fitEditor.ts`)・`EditStage.tsx` (指で直す。決まりは `gesture.ts`)・`Avatar.tsx` (アバターの台: マネキンと服の SVG)・`Photo.tsx` (切り抜いた写真)
 
 ## API
 | 方法 | 道 | 中身 |
