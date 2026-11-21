@@ -638,6 +638,7 @@ describe("服をしまう", () => {
   });
 
   test("服を消す (失敗すれば理由)", async () => {
+    vi.stubGlobal("confirm", () => true); // 消す前の確かめ (#40) は「はい」
     const el = await render();
     await click(button(el, "クローゼット"));
     await click(el.querySelector('[data-testid="shelf"] li button'));

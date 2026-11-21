@@ -1076,12 +1076,19 @@ function ClosetRoom({
               <button
                 type="button"
                 className="ghost small"
-                onClick={() =>
+                onClick={() => {
+                  // 1 回押すだけで写真ごと消えないように、どの服かを書いて確かめる
+                  if (
+                    !confirm(
+                      `「${nameOf(c)}」をクローゼットから消します。写真も消えて、元に戻せません。よろしいですか?`,
+                    )
+                  )
+                    return;
                   api.deleteClothing(c.id).then(() => {
                     forgetCutout(api.photoUrl(c.id));
                     onChange();
-                  }, onError)
-                }
+                  }, onError);
+                }}
               >
                 消す
               </button>
