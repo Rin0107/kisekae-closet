@@ -12,12 +12,14 @@ import {
 import { z } from "zod";
 import { Stage } from "./Avatar";
 import { cutoutOk, forgetCutout } from "./cutout";
+import { KindIcon } from "./KindIcon";
 import { Photo } from "./Photo";
 import { LIKENESS_NAMES, likeness, monthGrid, shiftMonth, sky, SKY_NAMES, type Sky } from "./calendar";
 import { api, ApiError, type Clothing, type Outfit } from "./client";
 import { advice, BAND_NAMES, dressIn, gauge, takeOff, wear } from "./outfit";
 import { login, register } from "./passkey";
 import { recommend } from "./recommend";
+import { addSamples } from "./samples";
 import { shrinkPhoto } from "./shrink";
 import { clearAll, forget, load, save } from "./storage";
 import { applyTheme, DEFAULT_THEME, ThemeId, themeById, THEMES } from "./theme";
@@ -138,7 +140,11 @@ function Welcome({ onIn }: { onIn: () => void }) {
       <button
         type="button"
         className="primary"
-        onClick={run(() => register(name.trim() || "kisekae-closet"))}
+        onClick={run(async () => {
+          await register(name.trim() || "kisekae-closet");
+          // 新しいアカウントには、見本の服を 1 セット入れておく
+          await addSamples();
+        })}
       >
         はじめる
       </button>
@@ -511,6 +517,13 @@ function Settings({ onOut }: { onOut: () => void }) {
               アカウントと全データを消す
             </button>
           </footer>
+          <p className="muted credits">
+            見本の服の写真は Wikimedia Commons から (作者とライセンス:{" "}
+            <a href="/samples/LICENSE.md" target="_blank" rel="noopener">
+              見本の写真の出どころ
+            </a>
+            )
+          </p>
         </div>
       )}
     </>
@@ -708,16 +721,18 @@ function Dresser({
       </div>
       {/* 台 (左) と棚 (右) を隣に、ラベル・ゲージ・決めるボタンはその下 (Rin0107/kisekae-closet-archive#50) */}
       <section aria-label="クローゼット" className="closet">
-        <div role="tablist" aria-label="服の種類" className="shelves">
+        <div role="tablist" aria-label="服の種類" className="shelves rail" aria-orientation="vertical">
           {SHELVES.map((s) => (
             <button
               key={s.id}
               type="button"
               role="tab"
               aria-selected={shelf === s.id}
+              title={s.name}
               onClick={() => setShelf(s.id)}
             >
-              {s.name}
+              <KindIcon kind={s.id} />
+              <span className="visually-hidden">{s.name}</span>
             </button>
           ))}
         </div>
@@ -725,7 +740,7 @@ function Dresser({
           <p className="empty muted">服を読んでいます…</p>
         ) : clothes.length === 0 ? (
           <div className="empty">
-            <p>まだ服がありません。クローゼットに服をしまうと、ここから着せられます。</p>
+            <p>まだ服がありません</p>
             <button type="button" className="primary" onClick={onGoCloset}>
               服をしまう
             </button>

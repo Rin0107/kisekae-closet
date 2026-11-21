@@ -99,6 +99,18 @@ async function garment(
   return Buffer.from(b64, "base64");
 }
 
+/** 新しいアカウントに入る見本の服を消す (自分でしまった服だけで確かめるテスト用)。消したら読み直す。 */
+async function clearSamples(page: Page) {
+  await expect(page.getByRole("button", { name: "見本 ニットを着る" })).toBeVisible();
+  await page.evaluate(async () => {
+    const r = (await (await fetch("/api/clothes")).json()) as { clothes: { id: string; label: string }[] };
+    for (const c of r.clothes)
+      if (c.label.startsWith("見本")) await fetch(`/api/clothes/${c.id}`, { method: "DELETE" });
+  });
+  await page.reload();
+  await expect(page.getByRole("button", { name: "見本 ニットを着る" })).toHaveCount(0);
+}
+
 async function stash(page: Page, kind: string, label: string, warmth: number, png: Buffer) {
   await page.getByRole("navigation", { name: "画面" }).getByRole("button", { name: "クローゼット" }).click();
   await page.getByRole("group", { name: "種類" }).getByRole("button", { name: kind }).click();
@@ -216,6 +228,7 @@ test("AC-7-5 AC-9-2 AC-22-3 AC-25-1 AC-25-2 AC-27-3 AC-28-1 AC-28-2 AC-29-2 AC-3
   await page.route("https://api.open-meteo.com/**", (r) => r.fulfill({ json: forecast(now) }));
   await page.goto("./");
   await page.getByRole("button", { name: "はじめる" }).click();
+  await clearSamples(page);
   await expect(page.getByRole("region", { name: "クローゼット" })).toBeVisible();
 
   await stash(page, "トップス", "白シャツ", 2, await garment(page, "#f4f1ea", "top"));
@@ -408,4 +421,38 @@ test("AC-7-5 AC-9-2 AC-22-3 AC-25-1 AC-25-2 AC-27-3 AC-28-1 AC-28-2 AC-29-2 AC-3
   await expect(page.getByTestId("day-stamp")).toHaveCount(1);
   await page.screenshot({ path: shot("calendar") });
   expect(await violations()).toEqual([]); // AC-25-2
+});
+
+test("見本: 新しいアカウントには 6 種類の見本の服が 1 枚ずつ入っていて、すぐ着せられる (持ち主 2026-11-21)", async ({
+  page,
+  baseURL,
+}) => {
+  test.skip(baseURL?.startsWith("https://") === true, "本番・プレビューにはアカウントを作らない");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await authenticator(page);
+  await page.route("https://api.open-meteo.com/**", (r) => r.fulfill({ json: forecast(new Date()) }));
+  await page.goto("./");
+  await page.getByRole("button", { name: "はじめる" }).click();
+  const names = ["トップス", "ワンピース", "ボトムス", "アウター", "くつ", "こもの"];
+  for (const n of names) {
+    await page.getByRole("tab", { name: n }).click();
+    const g = page.getByTestId("rack").getByTestId("garment");
+    await expect(g).toHaveCount(1);
+    await expect(g.first()).toHaveAccessibleName(/^見本 /);
+    // 写真が読めている (切り抜き前でも後でも、幅がある)
+    await expect
+      .poll(() =>
+        g
+          .first()
+          .locator("img")
+          .evaluate((i: HTMLImageElement) => (i.complete ? i.naturalWidth : 0)),
+      )
+      .toBeGreaterThan(0);
+  }
+  // おすすめで見本を着ている
+  await expect(page.getByTestId("stage").getByTestId("worn")).not.toHaveCount(0);
+  // 上部はステータスバーの下から (ホーム画面から開いたときの重なりよけ)
+  const pad = await page.locator("main").evaluate((m) => getComputedStyle(m).paddingTop);
+  expect(parseFloat(pad)).toBeGreaterThanOrEqual(16);
+  await page.screenshot({ path: shot("today-samples") });
 });
