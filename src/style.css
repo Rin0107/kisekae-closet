@@ -1019,3 +1019,18 @@ input {
 .weather-bar [data-testid="weather"] > .nb:first-child {
   flex-basis: 100%;
 }
+
+/* 登録: 写真を選ぶまで押せない。しまえたら小さなカードで知らせる (Rin0107/kisekae-closet-archive#49) */
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.saved {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-s);
+  background: var(--c-primary-soft);
+  color: var(--c-primary-strong);
+  font-weight: 700;
+  font-size: var(--fs-s);
+}

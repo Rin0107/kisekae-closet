@@ -578,8 +578,8 @@ describe("服をしまう", () => {
     expect(el.querySelector('[data-testid="guide"]')?.textContent).toContain(
       "ハンガーにかけて、正面からまっすぐ",
     );
-    await click(button(el, "クローゼットにしまう"));
-    expect(el.querySelector('[role="alert"]')?.textContent).toBe("写真を選ぶ");
+    // 写真を選ぶまで「しまう」は押せない (Rin0107/kisekae-closet-archive#49)
+    expect((button(el, "クローゼットにしまう") as HTMLButtonElement).disabled).toBe(true);
     const f = new File(["x"], "a.jpg", { type: "image/jpeg" });
     await pickFile(el, [f]);
     expect(el.querySelector('[data-testid="frame"] img')?.getAttribute("src")).toBe("blob:x");
@@ -613,8 +613,8 @@ describe("服をしまう", () => {
     expect(el.querySelector('[data-testid="frame"]')?.getAttribute("data-kind")).toBe("outer");
     await click(button(el, "ワンピース"));
     await pickFile(el, null);
-    await click(button(el, "クローゼットにしまう"));
-    expect(el.querySelector('[role="alert"]')?.textContent).toBe("写真を選ぶ");
+    // 写真を選ぶまで「しまう」は押せない (Rin0107/kisekae-closet-archive#49)
+    expect((button(el, "クローゼットにしまう") as HTMLButtonElement).disabled).toBe(true);
   });
 
   test("AC-2-5: DATA.md に、サーバーに置く服の欄とブラウザに置くキーが書かれている", () => {

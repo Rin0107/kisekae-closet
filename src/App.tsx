@@ -887,8 +887,11 @@ function ClosetRoom({
   // 撮り直すとき、ファイルの欄を空に戻す (同じ写真を選び直しても読み込む)
   const [picker, setPicker] = useState(0);
 
+  // しまえたら何が起きたかを知らせる (持ち主 Rin0107/kisekae-closet-archive#49「登録が難しい」)
+  const [saved, setSaved] = useState("");
   const add = async (k: string) => {
     setNote("");
+    setSaved("");
     if (file === null) return setNote("写真を選ぶ");
     const photo = await shrinkPhoto(file);
     const failed = "写真を保存できませんでした。もう一度撮り直してください。";
@@ -904,6 +907,7 @@ function ClosetRoom({
     setShelf(shelfOf(k));
     setLabel("");
     setFile(null);
+    setSaved(`${KIND_NAMES[k] ?? "服"}にしまいました`);
     setPicker((n) => n + 1);
     setWarmth(3);
     onChange();
@@ -952,7 +956,10 @@ function ClosetRoom({
               accept="image/*"
               capture="environment"
               className="visually-hidden"
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              onChange={(e) => {
+                setSaved("");
+                setFile(e.target.files?.[0] ?? null);
+              }}
             />
           </label>
           <label className="photo-button">
@@ -975,7 +982,10 @@ function ClosetRoom({
               type="file"
               accept="image/*"
               className="visually-hidden"
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              onChange={(e) => {
+                setSaved("");
+                setFile(e.target.files?.[0] ?? null);
+              }}
             />
           </label>
         </div>
@@ -1020,10 +1030,20 @@ function ClosetRoom({
             aria-label="ラベル"
           />
         </label>
-        <button type="button" className="primary" onClick={() => add(kind).catch(onError)}>
+        <button
+          type="button"
+          className="primary"
+          disabled={file === null}
+          onClick={() => add(kind).catch(onError)}
+        >
           クローゼットにしまう
         </button>
         {note && <p role="alert">{note}</p>}
+        {saved && (
+          <p role="status" className="saved">
+            {saved}
+          </p>
+        )}
       </div>
       <h2>クローゼット ({clothes.length})</h2>
       <div role="tablist" aria-label="服の種類" className="shelves">
