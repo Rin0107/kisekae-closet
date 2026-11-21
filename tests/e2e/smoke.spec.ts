@@ -106,12 +106,14 @@ test("パスキーで始め、ログアウトし、もう一度ログインで�
   // ログアウト・アカウントの削除はクローゼットの画面の下
   const closet = page.getByRole("navigation", { name: "画面" }).getByRole("button", { name: "クローゼット" });
   await closet.click();
+  await page.getByRole("button", { name: "設定" }).click();
   await page.getByRole("button", { name: "ログアウト" }).click();
   await expect(page.getByRole("button", { name: "パスキーでログイン" })).toBeVisible();
   await page.getByRole("button", { name: "パスキーでログイン" }).click();
   await expect(page.getByRole("region", { name: "クローゼット" })).toBeVisible();
 
   await closet.click();
+  await page.getByRole("button", { name: "設定" }).click();
   page.once("dialog", (d) => d.accept());
   await page.getByRole("button", { name: "アカウントと全データを消す" }).click();
   await expect(page.getByRole("button", { name: "はじめる" })).toBeVisible();
