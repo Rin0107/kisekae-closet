@@ -112,7 +112,7 @@ describe("袖を腕の向きに (#37)", () => {
     expect(ps).toHaveLength(3);
     for (const p of ps) {
       // 片の回し方は rotate だけ (skew・片方だけの拡大を使わない)
-      expect(p.style.transform).toMatch(/^(rotate\(-?[\d.e-]+deg\))?$/);
+      expect(p.style.transform).toMatch(/^(rotate\(-?[\d.e-]+deg\)( scale\([\d.]+\))?)?$/);
       const img = p.querySelector("img") as HTMLImageElement;
       expect(img.style.transform).toBe("");
       expect(img.style.height).toBe("100%");
@@ -349,7 +349,7 @@ describe("アウターを前開きに (#38)", () => {
     expect(ps[2]?.turn).toBe(0);
     const el = await wearLoaded([item("t1", "top"), item("o1", "outer")]);
     for (const p of el.querySelectorAll<HTMLElement>('[data-testid="piece"]')) {
-      expect(p.style.transform).toMatch(/^(rotate\(-?[\d.e-]+deg\))?$/);
+      expect(p.style.transform).toMatch(/^(rotate\(-?[\d.e-]+deg\)( scale\([\d.]+\))?)?$/);
       expect((p.querySelector("img") as HTMLImageElement).style.transform).toBe("");
     }
   });
@@ -365,14 +365,16 @@ describe("広い画面の並び (#40)・服をしまう画面の見出し (#41)"
     expect(wide).toContain("grid-template-columns: var(--stage-w) minmax(0, 1fr)");
   });
 
-  test("AC-40-2: 幅 360px の並びは今のまま (台の下に続く)", () => {
-    // メディアの外には .dresser の並びの決まりを書かない (縦に続く)
+  test("AC-40-2: 幅 360px でも、メディアの外で .dresser は台の列と棚の列の 2 列", () => {
+    // Rin0107/kisekae-closet-archive#50: スマホの幅でも台 (左) と棚 (右) を並べる
     const outside = css.replace(/@media[^{]*\{[\s\S]*?\n\}/g, "");
-    expect(outside).not.toMatch(/\.dresser \{/);
+    const d = /(?:^|\n)\.dresser \{([^}]*)\}/.exec(outside)?.[1] ?? "";
+    expect(d).toContain("display: grid");
+    expect(d).toContain("grid-template-columns: var(--stage-w) minmax(0, 1fr)");
   });
 
-  test("AC-41-1: 服をしまう画面の見出しは折り返さず、入らなければファイルの欄が次の行に回る", () => {
-    expect(/\.file-title \{([^}]*)\}/.exec(css)?.[1]).toContain("white-space: nowrap");
-    expect(/\.file \{([^}]*display: inline-flex[^}]*)\}/.exec(css)?.[1]).toContain("flex-wrap: wrap");
+  test("AC-41-1: 写真のボタンの文字は折り返さず、入らなければボタンが次の行に回る", () => {
+    expect(/\.photo-button \{([^}]*)\}/.exec(css)?.[1]).toContain("white-space: nowrap");
+    expect(/\.photo-buttons \{([^}]*)\}/.exec(css)?.[1]).toContain("flex-wrap: wrap");
   });
 });
