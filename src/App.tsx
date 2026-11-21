@@ -919,7 +919,10 @@ function ClosetRoom({
       <div className="kinds" role="group" aria-label="種類">
         {Object.entries(KIND_NAMES).map(([k, v]) => (
           <button key={k} type="button" aria-pressed={kind === k} onClick={() => setKind(k)}>
-            {v}
+            <svg viewBox="0 0 120 120" width="24" height="24" aria-hidden="true">
+              <path d={FRAMES[k]} />
+            </svg>
+            <span>{v}</span>
           </button>
         ))}
       </div>

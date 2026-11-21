@@ -371,15 +371,13 @@ input {
   box-shadow: var(--shadow);
   padding: var(--sp-2);
 }
-.shelves,
-.kinds {
+.shelves {
   display: flex;
   gap: var(--sp-1);
   overflow-x: auto;
   padding-bottom: var(--sp-1);
 }
-.shelves button,
-.kinds button {
+.shelves button {
   flex: none;
 }
 .rack {
@@ -1033,4 +1031,28 @@ button:disabled {
   color: var(--c-primary-strong);
   font-weight: 700;
   font-size: var(--fs-s);
+}
+
+/* しまう服の種類: 形の絵と名前のチップを 1 列で横に流す (Rin0107/kisekae-closet-archive#49) */
+.kinds {
+  display: flex;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  gap: var(--sp-1);
+  padding-bottom: var(--sp-1);
+  scrollbar-width: none;
+}
+.kinds button {
+  flex: none;
+  min-height: var(--tap);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: 0 var(--sp-3) 0 var(--sp-2);
+}
+.kinds svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 6;
+  stroke-linejoin: round;
 }
