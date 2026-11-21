@@ -1056,3 +1056,18 @@ button:disabled {
   stroke-width: 6;
   stroke-linejoin: round;
 }
+
+/* クローゼットのからっぽの棚: 次にすること (その種類を撮る) を棚の中で示す (Rin0107/kisekae-closet-archive#49) */
+.rack.grid .empty {
+  grid-column: 1 / -1;
+  display: grid;
+  justify-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-4) var(--sp-3);
+  border: 1px dashed var(--c-line);
+  border-radius: var(--radius);
+  color: var(--c-muted);
+}
+.rack.grid .empty p {
+  margin: 0;
+}

@@ -886,6 +886,8 @@ function ClosetRoom({
   }, [preview]);
   // 撮り直すとき、ファイルの欄を空に戻す (同じ写真を選び直しても読み込む)
   const [picker, setPicker] = useState(0);
+  // からっぽの棚の「○○を撮る」で、撮る欄まで動く (Rin0107/kisekae-closet-archive#49)
+  const register = useRef<HTMLDivElement>(null);
 
   // しまえたら何が起きたかを知らせる (持ち主 Rin0107/kisekae-closet-archive#49「登録が難しい」)
   const [saved, setSaved] = useState("");
@@ -913,6 +915,7 @@ function ClosetRoom({
     onChange();
   };
   const kinds = SHELVES.find((s) => s.id === shelf)?.kinds ?? [];
+  const shelfName = SHELVES.find((s) => s.id === shelf)?.name ?? "服";
   return (
     <section aria-label="服をしまう" className="closet-room">
       <h2>服をしまう</h2>
@@ -926,7 +929,7 @@ function ClosetRoom({
           </button>
         ))}
       </div>
-      <div className="register" data-testid="register">
+      <div className="register" data-testid="register" ref={register}>
         <div className="frame" data-testid="frame" data-kind={kind}>
           {preview && <Photo src={preview} alt="選んだ写真" />}
           <svg viewBox="0 0 120 120" aria-hidden="true">
@@ -1084,6 +1087,21 @@ function ClosetRoom({
               </button>
             </li>
           ))}
+        {clothes.every((c) => !kinds.includes(c.kind)) && (
+          <li className="empty">
+            <p>{shelfName}はまだありません</p>
+            <button
+              type="button"
+              className="primary"
+              onClick={() => {
+                setKind(kinds[0] ?? "top");
+                register.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+              }}
+            >
+              {shelfName}を撮る
+            </button>
+          </li>
+        )}
       </ul>
     </section>
   );
