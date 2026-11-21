@@ -207,7 +207,7 @@ describe("ログインのあと: 今日の画面", () => {
     expect(worn(el)).toEqual(["白T", "デニム", "スニーカー"]);
     const img = el.querySelector('[data-testid="worn"]') as HTMLImageElement;
     expect(img.getAttribute("src")).toBe("/api/clothes/t1/photo");
-    expect(img.style.top).toBe("12.5%");
+    expect(img.style.top).toBe("14%");
     expect(el.querySelector('[data-testid="labels"]')?.textContent).toBe("白Tデニムスニーカー");
   });
 

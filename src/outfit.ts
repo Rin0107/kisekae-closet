@@ -24,6 +24,8 @@ export interface Slot {
  */
 export const BODY = {
   /** 下着の上の端 (首の付け根)・下の端 (腰の下) */
+  /** あごの下の端 (2026-11-20 に絵を測った。ここから下は首で幅 9% ほど) */
+  chin: 13.5,
   neck: 16.3,
   hip: 52,
   /** 下着の左右の端 (一番広いところ) */
@@ -51,12 +53,13 @@ export const BODICE_SHARE = 0.52;
  * shoes は写真の形が分からないときの目安 (着せるときは shoeFeet で左右の足に分ける、#32)。
  * outer はトップスより一回り大きく、少し下から始める (中のトップスの襟元がのぞく、#33)。
  */
+// トップス・ワンピース・アウターは BODY.chin より下から始める (評価10、あごを覆わない)
 export const SLOTS: Record<string, Slot> = {
   // くつはボトムスの裾より前 (長ズボンでも甲が見える、#39)
   bottom: { top: 42, left: 26, width: 48, height: 50, z: 1, fit: "width" },
   shoes: { top: 86, left: 22, width: 56, height: 8, z: 2, fit: "box" },
-  top: { top: 12.5, left: 16, width: 68, height: 36, z: 3, fit: "width" },
-  dress: { top: 12.5, left: 16, width: 68, height: 56, z: 3, fit: "width" },
+  top: { top: 14, left: 16, width: 68, height: 36, z: 3, fit: "width" },
+  dress: { top: 14, left: 16, width: 68, height: 56, z: 3, fit: "width" },
   outer: { top: 14.2, left: 13, width: 74, height: 42, z: 4, fit: "width" },
   accessory: { top: 38, left: 72, width: 24, height: 17, z: 5, fit: "box" },
 };
