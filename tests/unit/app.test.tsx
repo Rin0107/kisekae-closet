@@ -175,6 +175,12 @@ const account = async (el: HTMLElement, text: string) => {
 };
 const worn = (root: HTMLElement) =>
   [...root.querySelectorAll('[data-testid="stage"] [data-testid="worn"]')].map((i) => i.getAttribute("alt"));
+/** 台で着ている服の ID (並びは問わないので並べ替える)。 */
+const ids = (root: HTMLElement) =>
+  worn(root)
+    .map((n) => CLOTHES.find((c) => c.label === n)?.id ?? "")
+    .sort();
+const sorted = (a: unknown) => [...((a as string[] | undefined) ?? [])].sort();
 const pointer = async (el: Element, type: string, x: number, y: number) => {
   await act(async () => {
     el.dispatchEvent(new PointerEvent(type, { bubbles: true, clientX: x, clientY: y, pointerId: 1 }));
@@ -328,7 +334,9 @@ describe("ログインのあと: 今日の画面", () => {
     expect(el.querySelector('[role="alert"][data-testid="weather-failed"]')?.textContent).toContain(
       "天気を読めませんでした",
     );
-    expect(button(el, "これに決めた")).toBeUndefined();
+    // 前回の予報もなければ、その月のふだんの天気でおすすめを着せる (評価 9)。決めることもできる
+    expect(el.querySelector('[data-testid="weather-normal"]')).not.toBeNull();
+    expect(button(el, "これに決めた")).toBeDefined();
   });
 
   test("AC-46-1: 天気が読めず前回の予報もなくても、服を着せれば「これに決めた」で決められ、天気が読めたらカレンダーに保存する", async () => {
@@ -341,29 +349,34 @@ describe("ログインのあと: 今日の画面", () => {
     const el = await render();
     await settle();
     expect(el.querySelector('[data-testid="weather-failed"]')).not.toBeNull();
-    expect(button(el, "これに決めた")).toBeUndefined(); // まだ何も着ていない
-    await click(el.querySelector('[aria-label="ニットを着る"]'));
+    // ふだんの天気でおすすめを着ている (評価 9)。そのまま決める
+    const chosen = ids(el);
+    expect(chosen.length).toBeGreaterThan(0);
     await click(button(el, "これに決めた"));
     expect(calls.some((c) => c.startsWith("POST outfits"))).toBe(false); // 天気の数字がまだない
     expect(el.querySelector('[data-testid="stamp"]')?.textContent).toBe("決めた!");
     expect(el.textContent).toContain("天気が読めたら、その日の天気と一緒にカレンダーに保存します");
     expect(button(el, "これに決めた")).toBeUndefined();
-    expect(JSON.parse(localStorage.getItem("kisekae-closet:pending") ?? "null")).toEqual({
-      wornOn: today(),
-      itemIds: ["t2"],
-    });
+    const held = JSON.parse(localStorage.getItem("kisekae-closet:pending") ?? "null") as {
+      wornOn: string;
+      itemIds: string[];
+    };
+    expect(held.wornOn).toBe(today());
+    expect(sorted(held.itemIds)).toEqual(chosen);
     // 天気が読めたら、決めたコーデをその日の天気と一緒に保存し、端末からは消す
     offline = false;
     routes.outfits = (m) =>
       m === "POST"
         ? [201, { id: "o" }]
-        : [200, { outfits: [{ ...PAST[0], id: "o", wornOn: today(), itemIds: ["t2"] }] }];
+        : [200, { outfits: [{ ...PAST[0], id: "o", wornOn: today(), itemIds: chosen }] }];
     await click(button(el, "もう一度読む"));
     await settle();
     const post = calls.find((c) => c.startsWith("POST outfits"));
-    expect(JSON.parse(post?.slice("POST outfits ".length) ?? "{}")).toEqual({
+    const body = JSON.parse(post?.slice("POST outfits ".length) ?? "{}") as { itemIds: string[] };
+    expect(sorted(body.itemIds)).toEqual(chosen);
+    expect({ ...body, itemIds: chosen }).toEqual({
       wornOn: today(),
-      itemIds: ["t2"],
+      itemIds: chosen,
       tempMax: 30,
       tempMin: 24,
       humidity: 60,
@@ -382,7 +395,7 @@ describe("ログインのあと: 今日の画面", () => {
     });
     const el = await render();
     await settle();
-    await click(el.querySelector('[aria-label="ニットを着る"]'));
+    const chosen = worn(el);
     await click(button(el, "これに決めた"));
     await click(tab(el, "カレンダー"));
     const cell = el.querySelector(`[data-testid="day-${today()}"]`) as HTMLElement;
@@ -396,7 +409,7 @@ describe("ログインのあと: 今日の画面", () => {
     const again = await render();
     await settle();
     expect(again.querySelector('[data-testid="stamp"]')).not.toBeNull();
-    expect(worn(again)).toEqual(["ニット"]);
+    expect(worn(again).sort()).toEqual(chosen.sort());
     document.body.replaceChildren();
     localStorage.setItem("kisekae-closet:pending", JSON.stringify({ wornOn: "2000-01-01", itemIds: ["t2"] }));
     const old = await render();
@@ -433,7 +446,7 @@ describe("ログインのあと: 今日の画面", () => {
       const e = await render();
       await settle();
       expect(e.querySelector('[data-testid="weather-failed"]')?.getAttribute("role")).toBe("alert");
-      expect(button(e, "これに決めた")).toBeUndefined();
+      expect(button(e, "これに決めた")).toBeDefined(); // ふだんの天気でおすすめを着ている (評価 9)
     }
   });
 
@@ -1176,7 +1189,7 @@ describe("天気の読み直し (#31)", () => {
     expect(el.querySelector('[data-testid="weather-failed"]')?.textContent).toContain(
       "天気を読めませんでした",
     );
-    expect(button(el, "これに決めた")).toBeUndefined();
+    expect(button(el, "これに決めた")).toBeDefined(); // ふだんの天気でおすすめを着ている (評価 9)
     const again = button(el, "もう一度読む");
     expect(again).toBeDefined();
     await click(again);
