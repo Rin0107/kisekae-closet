@@ -24,6 +24,8 @@ export interface Slot {
  */
 export const BODY = {
   /** 下着の上の端 (首の付け根)・下の端 (腰の下) */
+  /** あごの下の端 (2026-11-20 に絵を測った。ここから下は首で幅 9% ほど) */
+  chin: 13.5,
   neck: 16.3,
   hip: 52,
   /** 下着の左右の端 (一番広いところ) */
@@ -51,12 +53,13 @@ export const BODICE_SHARE = 0.52;
  * shoes は写真の形が分からないときの目安 (着せるときは shoeFeet で左右の足に分ける、#32)。
  * outer はトップスより一回り大きく、少し下から始める (中のトップスの襟元がのぞく、#33)。
  */
+// トップス・ワンピース・アウターは BODY.chin より下から始める (評価10、あごを覆わない)
 export const SLOTS: Record<string, Slot> = {
   // くつはボトムスの裾より前 (長ズボンでも甲が見える、#39)
   bottom: { top: 42, left: 26, width: 48, height: 50, z: 1, fit: "width" },
   shoes: { top: 86, left: 22, width: 56, height: 8, z: 2, fit: "box" },
-  top: { top: 12.5, left: 16, width: 68, height: 36, z: 3, fit: "width" },
-  dress: { top: 12.5, left: 16, width: 68, height: 56, z: 3, fit: "width" },
+  top: { top: 14, left: 16, width: 68, height: 36, z: 3, fit: "width" },
+  dress: { top: 14, left: 16, width: 68, height: 56, z: 3, fit: "width" },
   outer: { top: 14.2, left: 13, width: 74, height: 42, z: 4, fit: "width" },
   accessory: { top: 38, left: 72, width: 24, height: 17, z: 5, fit: "box" },
 };
@@ -141,6 +144,16 @@ const COUNTED = new Set(["top", "bottom", "dress", "outer"]);
 
 export type Band = "cold" | "ok" | "hot";
 export const BAND_NAMES: Record<Band, string> = { cold: "寒い", ok: "ちょうどいい", hot: "暑い" };
+
+/** いまの服でどうすればいいかの一言 (数字は出さない)。 */
+export const ADVICE: Record<Band, string> = {
+  cold: "少し寒そう。もう1枚重ねよう",
+  ok: "ちょうどいい。このままでOK",
+  hot: "少し暑そう。1枚減らそう",
+};
+export function advice(b: Band): string {
+  return ADVICE[b];
+}
 
 export interface Gauge {
   band: Band;
@@ -345,6 +358,42 @@ export function sleeveTurn(
   return t;
 }
 
+/** 袖を小さくして収めるときの下限 (これより小さくしない。腕より細い袖にしない)。 */
+export const SCALE_MIN = 0.7;
+
+/**
+ * 左の袖を回す角度と大きさ。角度は腕のまま (ARM_ANGLE にそろえる)、袖の先が台の外に出るなら、
+ * 付け根を中心に縦横同じ割合で小さくして収める (SCALE_MIN まで。写真は曲げない)。
+ * 小さくしても出るときだけ、sleeveTurn と同じに角度を内へ戻す。
+ */
+export function sleeveFit(
+  box: { top: number; left: number; width: number; height: number },
+  s: Sleeve | null,
+): { turn: number; scale: number } {
+  if (s === null) return { turn: 0, scale: 1 };
+  const want = Math.min(TURN_MAX, Math.max(TURN_MIN, ARM_ANGLE - s.angle));
+  const outAt = (deg: number, k: number) => {
+    const { pivot, tip } = sleevePoints(box, s, deg);
+    const scaled = { x: pivot.x + (tip.x - pivot.x) * k, y: pivot.y + (tip.y - pivot.y) * k };
+    return turnPoint(scaled, pivot, deg).x < EDGE_MARGIN;
+  };
+  const steps = Math.round((1 - SCALE_MIN) * 100);
+  for (let i = 0; i <= steps; i++) {
+    const k = i === steps ? SCALE_MIN : 1 - i / 100;
+    if (!outAt(want, k)) return { turn: want, scale: k };
+  }
+  let t = want;
+  while (t > TURN_MIN && outAt(t, SCALE_MIN)) t = Math.max(TURN_MIN, t - 1);
+  return { turn: t, scale: SCALE_MIN };
+}
+
+/** 片の動かし方 (CSS の transform)。rotate と、縦横同じ scale だけ。 */
+export function pieceTransform(p: Piece): string | undefined {
+  if (p.turn === 0 && p.scale === 1) return undefined;
+  if (p.scale === 1) return `rotate(${p.turn}deg)`;
+  return `rotate(${p.turn}deg) scale(${p.scale})`;
+}
+
 /** アウターの前を開ける幅 (台の幅に対する %)。 */
 export const OPEN_GAP = 8;
 
@@ -357,6 +406,8 @@ export interface Piece {
   box: { top: number; left: number; width: number; height: number };
   /** 回す角度 (度、時計回りが正) と、回す中心 (片の箱に対する %) */
   turn: number;
+  /** 付け根を中心に縦横同じ割合で小さくする (1 = そのまま) */
+  scale: number;
   origin: { x: number; y: number };
 }
 
@@ -384,17 +435,33 @@ export function pieces(
   const flat = { x: 50, y: 0 };
   const body: Piece[] = open
     ? [
-        { from: lc, to: 0.5, box: at(lc, 0.5, -shift), turn: 0, origin: flat },
-        { from: 0.5, to: rc, box: at(0.5, rc, shift), turn: 0, origin: flat },
+        { from: lc, to: 0.5, box: at(lc, 0.5, -shift), turn: 0, scale: 1, origin: flat },
+        { from: 0.5, to: rc, box: at(0.5, rc, shift), turn: 0, scale: 1, origin: flat },
       ]
-    : [{ from: lc, to: rc, box: at(lc, rc, 0), turn: 0, origin: flat }];
-  const lt = sleeveTurn(box, left);
-  const rt = sleeveTurn(box, right);
+    : [{ from: lc, to: rc, box: at(lc, rc, 0), turn: 0, scale: 1, origin: flat }];
+  const lf = sleeveFit(box, left);
+  const rf = sleeveFit(box, right);
+  const lt = lf.turn;
+  const rt = rf.turn;
   const oy = (s: Sleeve | null, t: number) => (s === null ? 0 : sleeveOrigin(s, t) * 100);
   return [
     // 左の袖は付け根 (右の端) を中心に時計回り (外へ)、右の袖は反時計回り
-    { from: 0, to: lc, box: at(0, lc, -shift), turn: lt, origin: { x: 100, y: oy(left, lt) } },
+    {
+      from: 0,
+      to: lc,
+      box: at(0, lc, -shift),
+      turn: lt,
+      scale: lf.scale,
+      origin: { x: 100, y: oy(left, lt) },
+    },
     ...body,
-    { from: rc, to: 1, box: at(rc, 1, shift), turn: -rt, origin: { x: 0, y: oy(right, rt) } },
+    {
+      from: rc,
+      to: 1,
+      box: at(rc, 1, shift),
+      turn: -rt,
+      scale: rf.scale,
+      origin: { x: 0, y: oy(right, rt) },
+    },
   ];
 }

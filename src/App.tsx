@@ -12,12 +12,14 @@ import {
 import { z } from "zod";
 import { Stage } from "./Avatar";
 import { cutoutOk, forgetCutout } from "./cutout";
+import { KindIcon } from "./KindIcon";
 import { Photo } from "./Photo";
 import { LIKENESS_NAMES, likeness, monthGrid, shiftMonth, sky, SKY_NAMES, type Sky } from "./calendar";
 import { api, ApiError, type Clothing, type Outfit } from "./client";
-import { BAND_NAMES, dressIn, gauge, takeOff, wear } from "./outfit";
+import { advice, BAND_NAMES, dressIn, gauge, takeOff, wear } from "./outfit";
 import { login, register } from "./passkey";
 import { recommend } from "./recommend";
+import { addSamples, SAMPLES } from "./samples";
 import { shrinkPhoto } from "./shrink";
 import { clearAll, forget, load, save } from "./storage";
 import { applyTheme, DEFAULT_THEME, ThemeId, themeById, THEMES } from "./theme";
@@ -25,6 +27,7 @@ import {
   canPlan,
   CITIES,
   fetchForecastRetrying,
+  normalWeather,
   fromSaved,
   SavedForecast,
   toSaved,
@@ -39,6 +42,15 @@ export const KIND_NAMES: Record<string, string> = {
   shoes: "くつ",
   accessory: "こもの",
 };
+
+/** 服の暖かさ 5 段階の言葉と服の例 (●の数だけでは選べない、#49)。 */
+export const WARMTH: { name: string; example: string }[] = [
+  { name: "とても薄い", example: "Tシャツ" },
+  { name: "薄手", example: "シャツ" },
+  { name: "ふつう", example: "ニット" },
+  { name: "厚手", example: "ジャケット" },
+  { name: "とても暖かい", example: "ダウン" },
+];
 
 /** クローゼットのタブ。種類ごとに 1 つ (ワンピースにも自分のタブ、#35)。 */
 export const SHELVES: { id: string; name: string; kinds: string[] }[] = [
@@ -88,6 +100,8 @@ type Wx =
 
 export function App() {
   const [state, setState] = useState<"loading" | "out" | "in">("loading");
+  // 始めたときの一言 (見本の服が入りきらなかったなど)
+  const [notice, setNotice] = useState("");
   // この端末でログインして使ったことがあれば (前回の予報がある)、天気はログインの確かめと同時に読み始める。
   // 使ったことのない端末では、ログインの前に外へ通信しない (確かめのあと Home が読む)
   const [first] = useState<FirstForecast | null>(() => {
@@ -106,15 +120,27 @@ export function App() {
     api.me().then(() => setState("in"), out);
   }, [out]);
   if (state === "loading") return <main aria-busy="true" />;
-  return state === "in" ? <Home first={first} onOut={out} /> : <Welcome onIn={() => setState("in")} />;
+  return state === "in" ? (
+    <Home first={first} onOut={out} notice={notice} />
+  ) : (
+    <Welcome
+      onIn={(n) => {
+        setNotice(n);
+        setState("in");
+      }}
+    />
+  );
 }
 
-function Welcome({ onIn }: { onIn: () => void }) {
+function Welcome({ onIn }: { onIn: (notice: string) => void }) {
   const [name, setName] = useState("");
   const [error, setError] = useState("");
-  const run = (f: () => Promise<void>) => () => {
+  const run = (f: () => Promise<string | undefined>) => () => {
     setError("");
-    f().then(onIn, (e: unknown) => setError(message(e)));
+    f().then(
+      (n) => onIn(n ?? ""),
+      (e: unknown) => setError(message(e)),
+    );
   };
   return (
     <main className="welcome">
@@ -129,11 +155,25 @@ function Welcome({ onIn }: { onIn: () => void }) {
       <button
         type="button"
         className="primary"
-        onClick={run(() => register(name.trim() || "kisekae-closet"))}
+        onClick={run(async () => {
+          await register(name.trim() || "kisekae-closet");
+          // 新しいアカウントには、見本の服を 1 セット入れておく
+          const n = await addSamples();
+          if (n < SAMPLES.length)
+            return `見本の服を ${SAMPLES.length - n} 枚入れられませんでした。服は「クローゼット」から入れられます。`;
+          return undefined;
+        })}
       >
         はじめる
       </button>
-      <button type="button" className="ghost" onClick={run(login)}>
+      <button
+        type="button"
+        className="ghost"
+        onClick={run(async () => {
+          await login();
+          return undefined;
+        })}
+      >
         パスキーでログイン
       </button>
       {error && <p role="alert">{error}</p>}
@@ -162,7 +202,15 @@ const TABS: { id: Tab; name: string }[] = [
   { id: "calendar", name: "カレンダー" },
 ];
 
-function Home({ first, onOut }: { first: FirstForecast | null; onOut: () => void }) {
+function Home({
+  first,
+  onOut,
+  notice = "",
+}: {
+  first: FirstForecast | null;
+  onOut: () => void;
+  notice?: string;
+}) {
   const [clothes, setClothes] = useState<Clothing[]>([]);
   const [outfits, setOutfits] = useState<Outfit[]>([]);
   // 服とコーデが 1 度届くまでは、アバターを下着姿にせず、ゲージも寒いにしない (#28)
@@ -178,7 +226,7 @@ function Home({ first, onOut }: { first: FirstForecast | null; onOut: () => void
   // null: まだ触っていない (決めたコーデか、おすすめを着る)
   const [worn, setWorn] = useState<Clothing[] | null>(null);
   const [sparkle, setSparkle] = useState(0);
-  const [error, setError] = useState("");
+  const [error, setError] = useState(notice);
   // 天気が読めないうちに決めたコーデ (#46)。今日より前の日のものは、もう保存できないので捨てる
   const [pending, setPending] = useState<Pending | null>(() => {
     const p = load("pending", Pending.nullable(), null);
@@ -253,9 +301,11 @@ function Home({ first, onOut }: { first: FirstForecast | null; onOut: () => void
       ? dressIn(clothes, held.itemIds)
       : decided !== undefined
         ? dressIn(clothes, decided.itemIds)
-        : weather === null
-          ? []
-          : recommend(clothes, outfits, weather, day);
+        : weather === null && wxState === "failed"
+          ? recommend(clothes, outfits, normalWeather(Number(day.slice(5, 7))), day)
+          : weather === null
+            ? []
+            : recommend(clothes, outfits, weather, day);
   // 消した服は着ていられない
   const current = (worn ?? base).filter((c) => clothes.some((x) => x.id === c.id));
 
@@ -355,6 +405,11 @@ function Home({ first, onOut }: { first: FirstForecast | null; onOut: () => void
               ) : wxState === "failed" ? (
                 <p className="weather" role="alert" data-testid="weather-failed">
                   天気を読めませんでした。
+                  {held === null && decided === undefined && (
+                    <span className="muted" data-testid="weather-normal">
+                      この時期のふだんの天気でえらびました
+                    </span>
+                  )}
                   {againButton}
                 </p>
               ) : (
@@ -410,6 +465,7 @@ function Home({ first, onOut }: { first: FirstForecast | null; onOut: () => void
           </section>
         )}
         {tab === "closet" && <ClosetRoom clothes={clothes} onChange={reload} onError={fail} />}
+        {tab === "closet" && <Settings onOut={onOut} />}
         {tab === "calendar" && (
           <CalendarRoom
             clothes={clothes}
@@ -430,8 +486,54 @@ function Home({ first, onOut }: { first: FirstForecast | null; onOut: () => void
           />
         )}
         {error && <p role="alert">{error}</p>}
-        {tab === "closet" && <ThemePicker />}
-        {tab === "closet" && (
+      </main>
+      <nav className="tabbar" aria-label="画面">
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            aria-current={tab === t.id ? "page" : undefined}
+            onClick={() => setTab(t.id)}
+          >
+            {t.name}
+          </button>
+        ))}
+      </nav>
+    </div>
+  );
+}
+
+/** テーマ・書き出し・ログアウト・アカウントの削除は、「設定」を押したときだけ開く。 */
+function Settings({ onOut }: { onOut: () => void }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button
+        type="button"
+        className="ghost settings-toggle"
+        aria-expanded={open}
+        aria-controls="settings-panel"
+        onClick={() => setOpen((o) => !o)}
+      >
+        <svg
+          viewBox="0 0 24 24"
+          width="18"
+          height="18"
+          aria-hidden="true"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <circle cx="12" cy="12" r="3" />
+          <path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1" />
+        </svg>
+        設定
+      </button>
+      {open && (
+        <div id="settings-panel" className="settings-panel">
+          <ThemePicker />
           <footer className="account">
             <a href="/api/export" download="closet.json">
               データを書き出す
@@ -455,21 +557,16 @@ function Home({ first, onOut }: { first: FirstForecast | null; onOut: () => void
               アカウントと全データを消す
             </button>
           </footer>
-        )}
-      </main>
-      <nav className="tabbar" aria-label="画面">
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            aria-current={tab === t.id ? "page" : undefined}
-            onClick={() => setTab(t.id)}
-          >
-            {t.name}
-          </button>
-        ))}
-      </nav>
-    </div>
+          <p className="muted credits">
+            見本の服の写真は Wikimedia Commons から (作者とライセンス:{" "}
+            <a href="/samples/LICENSE.md" target="_blank" rel="noopener">
+              見本の写真の出どころ
+            </a>
+            )
+          </p>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -575,6 +672,9 @@ function GaugeView({ worn, weather }: { worn: Clothing[]; weather: Weather | nul
       <p className="gauge-word">
         暖かさ: <strong>{BAND_NAMES[g.band]}</strong>
       </p>
+      <p className="gauge-advice" data-testid="gauge-advice" data-band={g.band}>
+        {advice(g.band)}
+      </p>
     </div>
   );
 }
@@ -659,7 +759,61 @@ function Dresser({
           </span>
         )}
       </div>
-      {/* 広い画面では台の右に並べる (#40)。狭い画面では台の下に続く */}
+      {/* 台 (左) と棚 (右) を隣に、ラベル・ゲージ・決めるボタンはその下 (Rin0107/kisekae-closet-archive#50) */}
+      <section aria-label="クローゼット" className="closet">
+        <div role="tablist" aria-label="服の種類" className="shelves rail" aria-orientation="vertical">
+          {SHELVES.map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              role="tab"
+              aria-selected={shelf === s.id}
+              title={s.name}
+              onClick={() => setShelf(s.id)}
+            >
+              <KindIcon kind={s.id} />
+              <span className="visually-hidden">{s.name}</span>
+            </button>
+          ))}
+        </div>
+        {pending ? (
+          <p className="empty muted">服を読んでいます…</p>
+        ) : clothes.length === 0 ? (
+          <div className="empty">
+            <p>まだ服がありません</p>
+            <button type="button" className="primary" onClick={onGoCloset}>
+              服をしまう
+            </button>
+          </div>
+        ) : onShelf.length === 0 ? (
+          <p className="empty muted">この棚はからっぽです</p>
+        ) : (
+          <ul className="rack" role="tabpanel" data-testid="rack">
+            {onShelf.map((c) => (
+              <li key={c.id}>
+                <button
+                  type="button"
+                  className="garment"
+                  data-testid="garment"
+                  aria-pressed={worn.some((w) => w.id === c.id)}
+                  aria-label={`${nameOf(c)}を着る`}
+                  onPointerDown={down}
+                  onPointerMove={move(c)}
+                  onPointerUp={up(c)}
+                  onPointerCancel={() => {
+                    start.current = null;
+                    setDrag(null);
+                  }}
+                  onClick={tap(c)}
+                >
+                  <Photo src={api.photoUrl(c.id)} alt="" />
+                  <span className="garment-label">{nameOf(c)}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
       <div className="dresser-side">
         <LabelRow worn={worn} />
         {(weather || pending) && <GaugeView worn={worn} weather={pending ? null : weather} />}
@@ -667,58 +821,6 @@ function Dresser({
           {decide}
           {stamp && <p className="muted">{stampNote}</p>}
         </div>
-        <section aria-label="クローゼット" className="closet">
-          <div role="tablist" aria-label="服の種類" className="shelves">
-            {SHELVES.map((s) => (
-              <button
-                key={s.id}
-                type="button"
-                role="tab"
-                aria-selected={shelf === s.id}
-                onClick={() => setShelf(s.id)}
-              >
-                {s.name}
-              </button>
-            ))}
-          </div>
-          {pending ? (
-            <p className="empty muted">服を読んでいます…</p>
-          ) : clothes.length === 0 ? (
-            <div className="empty">
-              <p>まだ服がありません。クローゼットに服をしまうと、ここから着せられます。</p>
-              <button type="button" className="primary" onClick={onGoCloset}>
-                服をしまう
-              </button>
-            </div>
-          ) : onShelf.length === 0 ? (
-            <p className="empty muted">この棚はからっぽです</p>
-          ) : (
-            <ul className="rack" role="tabpanel" data-testid="rack">
-              {onShelf.map((c) => (
-                <li key={c.id}>
-                  <button
-                    type="button"
-                    className="garment"
-                    data-testid="garment"
-                    aria-pressed={worn.some((w) => w.id === c.id)}
-                    aria-label={`${nameOf(c)}を着る`}
-                    onPointerDown={down}
-                    onPointerMove={move(c)}
-                    onPointerUp={up(c)}
-                    onPointerCancel={() => {
-                      start.current = null;
-                      setDrag(null);
-                    }}
-                    onClick={tap(c)}
-                  >
-                    <Photo src={api.photoUrl(c.id)} alt="" />
-                    <span className="garment-label">{nameOf(c)}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
       </div>
       {drag && (
         <Photo
@@ -753,7 +855,7 @@ function ClosetRoom({
   onChange: () => void;
   onError: (e: unknown) => void;
 }) {
-  const [kind, setKind] = useState<string | null>(null);
+  const [kind, setKind] = useState<string>("top");
   const [warmth, setWarmth] = useState(3);
   const [label, setLabel] = useState("");
   const [file, setFile] = useState<File | null>(null);
@@ -784,103 +886,171 @@ function ClosetRoom({
   }, [preview]);
   // 撮り直すとき、ファイルの欄を空に戻す (同じ写真を選び直しても読み込む)
   const [picker, setPicker] = useState(0);
+  // からっぽの棚の「○○を撮る」で、撮る欄まで動く (Rin0107/kisekae-closet-archive#49)
+  const register = useRef<HTMLDivElement>(null);
 
+  // しまえたら何が起きたかを知らせる (持ち主 Rin0107/kisekae-closet-archive#49「登録が難しい」)
+  const [saved, setSaved] = useState("");
   const add = async (k: string) => {
     setNote("");
+    setSaved("");
     if (file === null) return setNote("写真を選ぶ");
     const photo = await shrinkPhoto(file);
-    if (photo === null) return setNote("写真を小さくできない");
-    await api.addClothing({ kind: k, warmth, label, photo });
+    const failed = "写真を保存できませんでした。もう一度撮り直してください。";
+    if (photo === null) return setNote(failed);
+    try {
+      await api.addClothing({ kind: k, warmth, label, photo });
+    } catch (e) {
+      // サーバーの理由 (Exif など) は出さない。ログイン切れ (401) と 500 などは今までどおり投げる
+      if (e instanceof ApiError && e.status !== 401 && e.status >= 400 && e.status < 500)
+        return setNote(failed);
+      throw e;
+    }
     setShelf(shelfOf(k));
-    setKind(null);
     setLabel("");
     setFile(null);
+    setSaved(`${KIND_NAMES[k] ?? "服"}にしまいました`);
     setPicker((n) => n + 1);
     setWarmth(3);
     onChange();
   };
   const kinds = SHELVES.find((s) => s.id === shelf)?.kinds ?? [];
+  const shelfName = SHELVES.find((s) => s.id === shelf)?.name ?? "服";
   return (
     <section aria-label="服をしまう" className="closet-room">
       <h2>服をしまう</h2>
       <div className="kinds" role="group" aria-label="種類">
         {Object.entries(KIND_NAMES).map(([k, v]) => (
           <button key={k} type="button" aria-pressed={kind === k} onClick={() => setKind(k)}>
-            {v}
+            <svg viewBox="0 0 120 120" width="24" height="24" aria-hidden="true">
+              <path d={FRAMES[k]} />
+            </svg>
+            <span>{v}</span>
           </button>
         ))}
       </div>
-      {kind === null ? (
-        <p className="muted">まず、しまう服の種類を選んでください。</p>
-      ) : (
-        <div className="register" data-testid="register">
-          <div className="frame" data-testid="frame" data-kind={kind}>
-            {preview && <Photo src={preview} alt="選んだ写真" />}
-            <svg viewBox="0 0 120 120" aria-hidden="true">
-              <path d={FRAMES[kind]} />
+      <div className="register" data-testid="register" ref={register}>
+        <div className="frame" data-testid="frame" data-kind={kind}>
+          {preview && <Photo src={preview} alt="選んだ写真" />}
+          <svg viewBox="0 0 120 120" aria-hidden="true">
+            <path d={FRAMES[kind]} />
+          </svg>
+        </div>
+        <p className="guide" data-testid="guide">
+          ハンガーにかけて、正面からまっすぐ撮ってください。服が枠に収まるように (顔や部屋は写さない)。
+          <span data-testid="guide-bg">背景は服と違う色に (白い服なら色のある壁や布の前で)。</span>
+        </p>
+        <div className="photo-buttons">
+          <label className="photo-button primary">
+            <svg
+              viewBox="0 0 24 24"
+              width="24"
+              height="24"
+              aria-hidden="true"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M4 8h3l2-3h6l2 3h3v11H4z M12 17a4 4 0 1 0 0-8 4 4 0 0 0 0 8z" />
             </svg>
-          </div>
-          <p className="guide" data-testid="guide">
-            ハンガーにかけて、正面からまっすぐ撮ってください。服が枠に収まるように (顔や部屋は写さない)。
-            <span data-testid="guide-bg">背景は服と違う色に (白い服なら色のある壁や布の前で)。</span>
-          </p>
-          <label className="file">
-            <span className="file-title">写真を撮る・選ぶ</span>
+            カメラで撮る
             <input
               key={picker}
               type="file"
               accept="image/*"
               capture="environment"
-              aria-label="写真"
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              className="visually-hidden"
+              onChange={(e) => {
+                setSaved("");
+                setFile(e.target.files?.[0] ?? null);
+              }}
             />
           </label>
-          {preview && badCut === preview && (
-            <div className="cut-bad" role="status" data-testid="cut-bad">
-              <p>
-                背景と服の色が近くて、切り抜けませんでした。このままだと写真の四角ごとアバターに重なります。色のちがう壁や布の前で撮ってください。
-              </p>
-              <button
-                type="button"
-                className="ghost"
-                onClick={() => {
-                  setFile(null);
-                  setPicker((n) => n + 1);
-                }}
-              >
-                撮り直す
-              </button>
-            </div>
-          )}
-          <div className="warmth" role="group" aria-label="暖かさ">
-            <span>暖かさ</span>
-            {[1, 2, 3, 4, 5].map((n) => (
-              <button
-                key={n}
-                type="button"
-                aria-pressed={warmth === n}
-                aria-label={`暖かさ ${n}`}
-                onClick={() => setWarmth(n)}
-              >
-                {"●".repeat(n)}
-              </button>
-            ))}
-          </div>
-          <label className="field">
-            ラベル (例: 通勤・お気に入り)
+          <label className="photo-button">
+            <svg
+              viewBox="0 0 24 24"
+              width="24"
+              height="24"
+              aria-hidden="true"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M4 5h16v14H4z M4 16l5-5 4 4 3-3 4 4 M9 9.5h.01" />
+            </svg>
+            写真から選ぶ
             <input
-              value={label}
-              maxLength={40}
-              onChange={(e) => setLabel(e.target.value)}
-              aria-label="ラベル"
+              key={picker}
+              type="file"
+              accept="image/*"
+              className="visually-hidden"
+              onChange={(e) => {
+                setSaved("");
+                setFile(e.target.files?.[0] ?? null);
+              }}
             />
           </label>
-          <button type="button" className="primary" onClick={() => add(kind).catch(onError)}>
-            クローゼットにしまう
-          </button>
-          {note && <p role="alert">{note}</p>}
         </div>
-      )}
+        {preview && badCut === preview && (
+          <div className="cut-bad" role="status" data-testid="cut-bad">
+            <p>
+              背景と服の色が近くて、切り抜けませんでした。このままだと写真の四角ごとアバターに重なります。色のちがう壁や布の前で撮ってください。
+            </p>
+            <button
+              type="button"
+              className="ghost"
+              onClick={() => {
+                setFile(null);
+                setPicker((n) => n + 1);
+              }}
+            >
+              撮り直す
+            </button>
+          </div>
+        )}
+        <div className="warmth" role="group" aria-label="暖かさ">
+          <span>暖かさ</span>
+          {[1, 2, 3, 4, 5].map((n) => (
+            <button
+              key={n}
+              type="button"
+              aria-pressed={warmth === n}
+              aria-label={`暖かさ ${n}`}
+              onClick={() => setWarmth(n)}
+            >
+              <span className="warmth-name">{WARMTH[n - 1]?.name}</span>
+              <span className="warmth-example">{WARMTH[n - 1]?.example}</span>
+            </button>
+          ))}
+        </div>
+        <label className="field">
+          ラベル (例: 通勤・お気に入り)
+          <input
+            value={label}
+            maxLength={40}
+            onChange={(e) => setLabel(e.target.value)}
+            aria-label="ラベル"
+          />
+        </label>
+        <button
+          type="button"
+          className="primary"
+          disabled={file === null}
+          onClick={() => add(kind).catch(onError)}
+        >
+          クローゼットにしまう
+        </button>
+        {note && <p role="alert">{note}</p>}
+        {saved && (
+          <p role="status" className="saved">
+            {saved}
+          </p>
+        )}
+      </div>
       <h2>クローゼット ({clothes.length})</h2>
       <div role="tablist" aria-label="服の種類" className="shelves">
         {SHELVES.map((s) => (
@@ -902,21 +1072,43 @@ function ClosetRoom({
             <li key={c.id} className="garment">
               <Photo src={api.photoUrl(c.id)} alt={nameOf(c)} />
               <span className="garment-label">{nameOf(c)}</span>
-              <span className="muted">暖かさ {"●".repeat(c.warmth)}</span>
+              <span className="muted">暖かさ: {WARMTH[c.warmth - 1]?.name}</span>
               <button
                 type="button"
                 className="ghost small"
-                onClick={() =>
+                onClick={() => {
+                  // 1 回押すだけで写真ごと消えないように、どの服かを書いて確かめる
+                  if (
+                    !confirm(
+                      `「${nameOf(c)}」をクローゼットから消します。写真も消えて、元に戻せません。よろしいですか?`,
+                    )
+                  )
+                    return;
                   api.deleteClothing(c.id).then(() => {
                     forgetCutout(api.photoUrl(c.id));
                     onChange();
-                  }, onError)
-                }
+                  }, onError);
+                }}
               >
                 消す
               </button>
             </li>
           ))}
+        {clothes.every((c) => !kinds.includes(c.kind)) && (
+          <li className="empty">
+            <p>{shelfName}はまだありません</p>
+            <button
+              type="button"
+              className="primary"
+              onClick={() => {
+                setKind(kinds[0] ?? "top");
+                register.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+              }}
+            >
+              {shelfName}を撮る
+            </button>
+          </li>
+        )}
       </ul>
     </section>
   );
