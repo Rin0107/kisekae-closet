@@ -1,0 +1,31 @@
+{
+  "assets": {
+    "binding": "ASSETS",
+    "directory": "./public",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": true
+  },
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_id": "617d8c03-59d8-4a0e-903f-52e1a636ab4b",
+      "database_name": "kisekae-closet",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "main": "worker.js",
+  "name": "kisekae-closet",
+  "no_bundle": true,
+  "observability": {
+    "enabled": false
+  },
+  "preview_urls": false,
+  "vars": {
+    "ORIGIN": "https://kisekae-closet.wakuwaku-factory.workers.dev"
+  },
+  "workers_dev": true
+}

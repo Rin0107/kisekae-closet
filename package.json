@@ -1,0 +1,7 @@
+{
+  "devDependencies": {
+    "wrangler": "4.158.0"
+  },
+  "name": "kisekae-closet-deploy",
+  "private": true
+}
