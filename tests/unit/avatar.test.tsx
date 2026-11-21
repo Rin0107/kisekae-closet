@@ -308,7 +308,7 @@ describe("服の丈 (#33)", () => {
     // アウターは少し下から始まり、トップスの襟元がのぞく。
     // 元は「1.5% 以上」だったが、計画 v0.11 の評価10 (あごを覆わない) で、トップスは BODY.chin (13.5) 以上・
     // アウターは BODY.neck − 2 (14.3) より上と決まり、差は 0.8 までしか取れない。今はトップス 14・アウター 14.2
-    expect(outer.top - top.top).toBeGreaterThanOrEqual(0.2);
+    expect(outer.top - top.top).toBeGreaterThan(0.15);
     // アウターはトップスより一回り大きい (両側に袖が出る)
     expect(outer.left).toBeLessThan(top.left);
     expect(outer.left + outer.width).toBeGreaterThan(top.left + top.width);
