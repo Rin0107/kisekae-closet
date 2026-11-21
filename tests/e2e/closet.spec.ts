@@ -99,6 +99,18 @@ async function garment(
   return Buffer.from(b64, "base64");
 }
 
+/** 新しいアカウントに入る見本の服を消す (自分でしまった服だけで確かめるテスト用)。消したら読み直す。 */
+async function clearSamples(page: Page) {
+  await expect(page.getByRole("button", { name: "見本 ニットを着る" })).toBeVisible();
+  await page.evaluate(async () => {
+    const r = (await (await fetch("/api/clothes")).json()) as { clothes: { id: string; label: string }[] };
+    for (const c of r.clothes)
+      if (c.label.startsWith("見本")) await fetch(`/api/clothes/${c.id}`, { method: "DELETE" });
+  });
+  await page.reload();
+  await expect(page.getByRole("button", { name: "見本 ニットを着る" })).toHaveCount(0);
+}
+
 async function stash(page: Page, kind: string, label: string, warmth: number, png: Buffer) {
   await page.getByRole("navigation", { name: "画面" }).getByRole("button", { name: "クローゼット" }).click();
   await page.getByRole("group", { name: "種類" }).getByRole("button", { name: kind }).click();
@@ -106,7 +118,7 @@ async function stash(page: Page, kind: string, label: string, warmth: number, pn
   // AC-27-3: 撮り方の案内に背景の色のこと
   await expect(page.getByTestId("guide-bg")).toContainText("背景は服と違う色");
   await page
-    .getByLabel("写真", { exact: true })
+    .getByLabel("写真から選ぶ", { exact: true })
     .setInputFiles({ name: "a.png", mimeType: "image/png", buffer: png });
   // AC-25-1: 下見は切り抜かれて出る (白い背景の 300×300 から、服のところだけの大きさになる)
   const preview = page.getByAltText("選んだ写真");
@@ -156,12 +168,14 @@ test("AC-46-1 AC-47-1: 天気が読めない新しい端末でも、服を着せ
   await page.route("https://api.open-meteo.com/**", (r) => r.abort());
   await page.goto("./");
   await page.getByRole("button", { name: "はじめる" }).click();
+  // 見本の服は消す (自分でしまった服 1 枚だけで確かめる)
+  await clearSamples(page);
 
   // AC-47-1: 白い背景の白い服は切り抜けないと知らせ、撮り直しを選べる
   await page.getByRole("navigation", { name: "画面" }).getByRole("button", { name: "クローゼット" }).click();
   await page.getByRole("group", { name: "種類" }).getByRole("button", { name: "トップス" }).click();
   await page
-    .getByLabel("写真", { exact: true })
+    .getByLabel("写真から選ぶ", { exact: true })
     .setInputFiles({ name: "w.png", mimeType: "image/png", buffer: await garment(page, "#fefefe", "top") });
   await expect(page.getByTestId("cut-bad")).toContainText("切り抜けませんでした");
   await page.getByRole("button", { name: "撮り直す" }).click();
@@ -174,7 +188,10 @@ test("AC-46-1 AC-47-1: 天気が読めない新しい端末でも、服を着せ
   // AC-46-1: 天気が読めなくても、着せれば決められる (保存は天気が読めてから)
   await page.getByRole("navigation", { name: "画面" }).getByRole("button", { name: "今日" }).click();
   await expect(page.getByTestId("weather-failed")).toBeVisible();
-  await page.getByRole("button", { name: "ピンクニットを着る" }).click();
+  // 天気が読めなくても、ふだんの天気でおすすめを着ていることがある (評価 9)。着ていなければ着せる
+  const knit = page.getByRole("button", { name: "ピンクニットを着る" });
+  if ((await knit.getAttribute("aria-pressed")) !== "true") await knit.click();
+  await expect(knit).toHaveAttribute("aria-pressed", "true");
   await page.getByRole("button", { name: "これに決めた" }).click();
   await expect(page.getByTestId("stamp")).toBeVisible();
   await expect(page.getByText("天気が読めたら、その日の天気と一緒にカレンダーに保存します")).toBeVisible();
@@ -216,6 +233,7 @@ test("AC-7-5 AC-9-2 AC-22-3 AC-25-1 AC-25-2 AC-27-3 AC-28-1 AC-28-2 AC-29-2 AC-3
   await page.route("https://api.open-meteo.com/**", (r) => r.fulfill({ json: forecast(now) }));
   await page.goto("./");
   await page.getByRole("button", { name: "はじめる" }).click();
+  await clearSamples(page);
   await expect(page.getByRole("region", { name: "クローゼット" })).toBeVisible();
 
   await stash(page, "トップス", "白シャツ", 2, await garment(page, "#f4f1ea", "top"));
@@ -333,18 +351,20 @@ test("AC-7-5 AC-9-2 AC-22-3 AC-25-1 AC-25-2 AC-27-3 AC-28-1 AC-28-2 AC-29-2 AC-3
       b.y + b.height <= stampBox.y;
     expect(apart, JSON.stringify({ stamp: stampBox, other: b })).toBe(true);
   }
-  // AC-40-2: 幅 360px では棚は台の下
-  const rackTop = await page.getByTestId("rack").boundingBox();
+  // AC-40-2: 幅 360px でも棚は台の右 (台と棚が 1 画面に並ぶ)
+  const rackBox = await page.getByTestId("rack").boundingBox();
   const narrow = await stage.boundingBox();
-  expect(rackTop?.y ?? 0).toBeGreaterThanOrEqual((narrow?.y ?? 0) + (narrow?.height ?? 0));
-  // AC-41-1: 服をしまう画面の見出し『写真を撮る・選ぶ』は 1 行
+  expect(rackBox?.x ?? 0).toBeGreaterThanOrEqual((narrow?.x ?? 0) + (narrow?.width ?? 0));
+  // AC-41-1: 服をしまう画面の写真のボタンの文字は 1 行
   await page.getByRole("navigation", { name: "画面" }).getByRole("button", { name: "クローゼット" }).click();
   await page.getByRole("group", { name: "種類" }).getByRole("button", { name: "トップス" }).click();
-  const title = page.locator(".file-title");
-  await expect(title).toHaveText("写真を撮る・選ぶ");
-  expect(
-    await title.evaluate((e) => new Set([...e.getClientRects()].map((r) => Math.round(r.top))).size),
-  ).toBe(1);
+  for (const [i, text] of ["カメラで撮る", "写真から選ぶ"].entries()) {
+    const title = page.locator(".photo-button").nth(i);
+    await expect(title).toHaveText(text);
+    expect(
+      await title.evaluate((e) => new Set([...e.getClientRects()].map((r) => Math.round(r.top))).size),
+    ).toBe(1);
+  }
   await page.getByRole("navigation", { name: "画面" }).getByRole("button", { name: "今日" }).click();
   // AC-34-1: デスクトップ幅 (1280px) では台が大きい
   await page.setViewportSize({ width: 1280, height: 900 });
@@ -406,4 +426,38 @@ test("AC-7-5 AC-9-2 AC-22-3 AC-25-1 AC-25-2 AC-27-3 AC-28-1 AC-28-2 AC-29-2 AC-3
   await expect(page.getByTestId("day-stamp")).toHaveCount(1);
   await page.screenshot({ path: shot("calendar") });
   expect(await violations()).toEqual([]); // AC-25-2
+});
+
+test("見本: 新しいアカウントには 6 種類の見本の服が 1 枚ずつ入っていて、すぐ着せられる (持ち主 2026-11-21)", async ({
+  page,
+  baseURL,
+}) => {
+  test.skip(baseURL?.startsWith("https://") === true, "本番・プレビューにはアカウントを作らない");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await authenticator(page);
+  await page.route("https://api.open-meteo.com/**", (r) => r.fulfill({ json: forecast(new Date()) }));
+  await page.goto("./");
+  await page.getByRole("button", { name: "はじめる" }).click();
+  const names = ["トップス", "ワンピース", "ボトムス", "アウター", "くつ", "こもの"];
+  for (const n of names) {
+    await page.getByRole("tab", { name: n }).click();
+    const g = page.getByTestId("rack").getByTestId("garment");
+    await expect(g).toHaveCount(1);
+    await expect(g.first()).toHaveAccessibleName(/^見本 /);
+    // 写真が読めている (切り抜き前でも後でも、幅がある)
+    await expect
+      .poll(() =>
+        g
+          .first()
+          .locator("img")
+          .evaluate((i: HTMLImageElement) => (i.complete ? i.naturalWidth : 0)),
+      )
+      .toBeGreaterThan(0);
+  }
+  // おすすめで見本を着ている
+  await expect(page.getByTestId("stage").getByTestId("worn")).not.toHaveCount(0);
+  // 上部はステータスバーの下から (ホーム画面から開いたときの重なりよけ)
+  const pad = await page.locator("main").evaluate((m) => getComputedStyle(m).paddingTop);
+  expect(parseFloat(pad)).toBeGreaterThanOrEqual(16);
+  await page.screenshot({ path: shot("today-samples") });
 });
