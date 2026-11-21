@@ -27,6 +27,7 @@ import {
   canPlan,
   CITIES,
   fetchForecastRetrying,
+  normalWeather,
   fromSaved,
   SavedForecast,
   toSaved,
@@ -300,9 +301,11 @@ function Home({
       ? dressIn(clothes, held.itemIds)
       : decided !== undefined
         ? dressIn(clothes, decided.itemIds)
-        : weather === null
-          ? []
-          : recommend(clothes, outfits, weather, day);
+        : weather === null && wxState === "failed"
+          ? recommend(clothes, outfits, normalWeather(Number(day.slice(5, 7))), day)
+          : weather === null
+            ? []
+            : recommend(clothes, outfits, weather, day);
   // 消した服は着ていられない
   const current = (worn ?? base).filter((c) => clothes.some((x) => x.id === c.id));
 
@@ -402,6 +405,11 @@ function Home({
               ) : wxState === "failed" ? (
                 <p className="weather" role="alert" data-testid="weather-failed">
                   天気を読めませんでした。
+                  {held === null && decided === undefined && (
+                    <span className="muted" data-testid="weather-normal">
+                      この時期のふだんの天気でえらびました
+                    </span>
+                  )}
                   {againButton}
                 </p>
               ) : (
