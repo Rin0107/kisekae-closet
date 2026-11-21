@@ -1135,3 +1135,202 @@ button:disabled {
   width: 20px;
   height: 20px;
 }
+
+/* 型紙合わせ (#81): 切り抜いた写真の上に、種類ごとの印のつまみ */
+.fit-editor {
+  display: grid;
+  gap: var(--sp-2);
+  justify-items: center;
+}
+.fit-photo {
+  position: relative;
+  width: min(80vw, 320px);
+  min-height: 120px;
+  /* 透明なところ (消した背景) が分かるように市松模様 */
+  background: repeating-conic-gradient(var(--c-surface-2) 0% 25%, var(--c-surface) 0% 50%) 50% / 16px 16px;
+  border-radius: var(--radius-s);
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+.fit-photo[data-tool="erase"],
+.fit-photo[data-tool="restore"] {
+  cursor: crosshair;
+  outline: 2px dashed var(--c-primary);
+}
+.fit-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.fit-loading {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  margin: 0;
+}
+/* つまみ: 押せる大きさは 48px、見える丸は 20px */
+button.fit-dot {
+  position: absolute;
+  width: var(--tap);
+  height: var(--tap);
+  min-height: var(--tap);
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  transform: translate(-50%, -50%);
+  touch-action: none;
+}
+.fit-dot::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 3px solid #fff;
+  background: var(--dot);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.4);
+  transform: translate(-50%, -50%);
+}
+.fit-dot.dot-a {
+  --dot: #e5484d;
+}
+.fit-dot.dot-b {
+  --dot: #3e63dd;
+}
+.fit-dot.dot-c {
+  --dot: #f76b15;
+}
+.fit-dot.dot-d {
+  --dot: #12a594;
+}
+.fit-dot-name {
+  position: absolute;
+  top: calc(100% - 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 0 6px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.9);
+  color: #222;
+  font-size: 0.6875rem;
+  white-space: nowrap;
+  pointer-events: none;
+}
+/* ルーペ: 指で隠れる印のまわりを、指の上に大きく */
+.fit-loupe {
+  position: absolute;
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  border: 2px solid var(--c-text);
+  background: var(--c-surface);
+  transform: translate(-50%, calc(-100% - 36px));
+  pointer-events: none;
+}
+.fit-nudge {
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-s);
+  background: var(--c-surface-2);
+}
+button.fit-need {
+  background: var(--c-primary-soft);
+}
+.refit {
+  display: grid;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
+}
+.refit .row {
+  display: flex;
+  gap: var(--sp-2);
+  justify-content: center;
+}
+.check {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+/* 指で直す (#83): 台の上の透明なボタン (タップで全画面へ)・全画面の「直す」モード */
+.stage-tap {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: var(--stage-w);
+  height: 40%;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: zoom-in;
+}
+.look-row {
+  justify-content: center;
+}
+.edit-stage {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: var(--sp-2);
+  padding: max(env(safe-area-inset-top), var(--sp-2)) var(--sp-4)
+    max(env(safe-area-inset-bottom), var(--sp-2));
+  background: var(--c-bg);
+  overflow: auto;
+}
+.edit-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.edit-bar p {
+  flex: 1;
+  margin: 0;
+  font-size: 0.8125rem;
+}
+.edit-wrap {
+  position: relative;
+  justify-self: center;
+}
+.edit-layer {
+  position: absolute;
+  inset: 0;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+.edit-sel {
+  fill: none;
+  stroke: var(--c-primary-strong);
+  stroke-width: 0.5;
+  stroke-dasharray: 1.5 1;
+}
+.edit-tip {
+  fill: var(--c-primary);
+  stroke: #fff;
+  stroke-width: 0.6;
+}
+.edit-tools {
+  display: grid;
+  gap: var(--sp-1);
+  justify-items: center;
+}
+.edit-tools p {
+  margin: 0;
+}
+.edit-tools .chips {
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.body-picker {
+  display: grid;
+  gap: var(--sp-2);
+}

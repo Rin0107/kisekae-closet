@@ -11,7 +11,22 @@ import {
 } from "react";
 import { z } from "zod";
 import { Mannequin, Stage } from "./Avatar";
-import { dress, STAGE } from "./fit";
+import { FitEditor, type FitEditorHandle } from "./FitEditor";
+import { EditStage } from "./EditStage";
+import {
+  body,
+  BUILD_NAMES,
+  BUILDS,
+  dress,
+  HEIGHTS,
+  NO_POSE,
+  STAGE,
+  type Adj,
+  type Body,
+  type Build,
+  type Height,
+  type Pose,
+} from "./fit";
 import { cutoutOk, forgetCutout } from "./cutout";
 import { KindIcon } from "./KindIcon";
 import { Photo } from "./Photo";
@@ -79,6 +94,12 @@ function message(e: unknown): string {
 const nameOf = (c: Clothing) => c.label || (KIND_NAMES[c.kind] ?? "服");
 
 const City = z.string();
+/** 体型 (#84)。端末にだけ置く */
+const BodyShape = z.object({
+  height: z.union([z.literal(150), z.literal(160), z.literal(170)]),
+  build: z.enum(["slim", "regular", "sturdy"]),
+});
+type BodyShape = { height: Height; build: Build };
 
 /** 開いた瞬間に始めた予報の読み込み (ログインの確かめを待たない、#21)。 */
 interface FirstForecast {
@@ -254,6 +275,16 @@ function Home({
     return p !== null && p.wornOn >= today() ? p : null;
   });
   const sending = useRef(false);
+  // 指の直し (#83)。null: 触っていない (決めたコーデの直しのまま、なければ直しなし)
+  const [look, setLook] = useState<{ adj: Record<string, Adj>; pose: Pose } | null>(null);
+  const [editing, setEditing] = useState(false);
+  // インする (#84)。見るだけで保存しない
+  const [tuck, setTuck] = useState(false);
+  // 体型 (#84)。端末にだけ置く
+  const [shape, setShape] = useState(() =>
+    load("body", BodyShape, { height: 160, build: "regular" } as const),
+  );
+  const bodyOf = useMemo(() => body(shape.height, shape.build), [shape]);
 
   const fail = useCallback(
     (e: unknown) => (e instanceof ApiError && e.status === 401 ? onOut() : setError(message(e))),
@@ -333,15 +364,26 @@ function Home({
   const choose = (d: string) => {
     setPlan(d);
     setWorn(null);
+    setLook(null);
+  };
+  const saved = held === null && decided !== undefined ? decided : undefined;
+  const lookNow = look ?? { adj: saved?.adj ?? {}, pose: saved?.pose ?? NO_POSE };
+  /** 保存する直し: 着ている服の分だけ、直していないもの (ふつうの位置・姿勢) は送らない */
+  const lookToSave = () => {
+    const adj = Object.fromEntries(
+      Object.entries(lookNow.adj).filter(([id]) => current.some((c) => c.id === id)),
+    );
+    const plain = JSON.stringify(lookNow.pose) === JSON.stringify(NO_POSE);
+    return { ...(Object.keys(adj).length > 0 ? { adj } : {}), ...(plain ? {} : { pose: lookNow.pose }) };
   };
   const put = (items: Clothing[]) => {
     setWorn(items);
     setSparkle((n) => n + 1);
   };
   /** その日のコーデを天気と一緒に保存する。決め直しなら前のものを消す。 */
-  const store = (wornOn: string, itemIds: string[], w: Weather) => {
+  const store = (wornOn: string, itemIds: string[], w: Weather, extra: Pick<Outfit, "adj" | "pose"> = {}) => {
     const before = outfits.find((o) => o.wornOn === wornOn);
-    return api.addOutfit({ wornOn, itemIds, ...w }).then(() => {
+    return api.addOutfit({ wornOn, itemIds, ...w, ...extra }).then(() => {
       // 決め直し: 新しいものを足せたら、前のものを消す。消せなくても新しいほうが今日のコーデ
       const old =
         before === undefined ? Promise.resolve() : api.deleteOutfit(before.id).then(() => undefined);
@@ -360,7 +402,11 @@ function Home({
       day,
       current.map((i) => i.id),
       w,
-    ).then(() => setWorn(null), fail);
+      lookToSave(),
+    ).then(() => {
+      setWorn(null);
+      setLook(null);
+    }, fail);
   };
   // 天気が読めないときは、端末に置いておき、読めたら保存する (#46)
   const decideLater = () => {
@@ -387,10 +433,26 @@ function Home({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pending, pendingWeather, loaded]);
   const isHeld = held !== null && sameItems(held.itemIds, current);
-  const isDecided = isHeld || (held === null && decided !== undefined && sameItems(decided.itemIds, current));
+  const sameLook =
+    saved === undefined ||
+    (JSON.stringify(lookToSave().adj ?? {}) === JSON.stringify(saved.adj ?? {}) &&
+      JSON.stringify(lookToSave().pose ?? null) === JSON.stringify(saved.pose ?? null));
+  const isDecided =
+    isHeld || (held === null && decided !== undefined && sameItems(decided.itemIds, current) && sameLook);
 
   return (
     <div className="app">
+      {editing && tab === "today" && (
+        <EditStage
+          worn={current}
+          adj={lookNow.adj}
+          pose={lookNow.pose}
+          tuck={tuck}
+          body={bodyOf}
+          onChange={(adj, pose) => setLook({ adj, pose })}
+          onClose={() => setEditing(false)}
+        />
+      )}
       <main>
         {tab === "today" && (
           <section aria-label="今日" className="today">
@@ -471,6 +533,9 @@ function Home({
                     : `${md(plan)}のコーデとしてカレンダーに載りました`
               }
               onGoCloset={() => setTab("closet")}
+              look={{ ...lookNow, tuck, body: bodyOf }}
+              onEdit={() => setEditing(true)}
+              onTuck={() => setTuck((t) => !t)}
               decide={
                 current.length > 0 && !isDecided ? (
                   <button
@@ -486,7 +551,16 @@ function Home({
           </section>
         )}
         {tab === "closet" && <ClosetRoom clothes={clothes} onChange={reload} onError={fail} />}
-        {tab === "closet" && <Settings onOut={onOut} />}
+        {tab === "closet" && (
+          <Settings
+            onOut={onOut}
+            shape={shape}
+            onShape={(s) => {
+              save("body", s);
+              setShape(s);
+            }}
+          />
+        )}
         {tab === "calendar" && (
           <CalendarRoom
             clothes={clothes}
@@ -525,7 +599,15 @@ function Home({
 }
 
 /** テーマ・書き出し・ログアウト・アカウントの削除は、「設定」を押したときだけ開く。 */
-function Settings({ onOut }: { onOut: () => void }) {
+function Settings({
+  onOut,
+  shape,
+  onShape,
+}: {
+  onOut: () => void;
+  shape: BodyShape;
+  onShape: (s: BodyShape) => void;
+}) {
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -555,6 +637,7 @@ function Settings({ onOut }: { onOut: () => void }) {
       {open && (
         <div id="settings-panel" className="settings-panel">
           <ThemePicker />
+          <BodyPicker shape={shape} onShape={onShape} />
           <footer className="account">
             <a href="/api/export" download="closet.json">
               データを書き出す
@@ -592,6 +675,39 @@ function Settings({ onOut }: { onOut: () => void }) {
 }
 
 /** サイト全体の色を選ぶ。選んだものは端末にだけ覚える。 */
+/** 体型 (#84): 身長 3 段・体格 3 段。服との釣り合いが変わる。端末にだけ置く */
+function BodyPicker({ shape, onShape }: { shape: BodyShape; onShape: (s: BodyShape) => void }) {
+  return (
+    <section aria-label="体型" className="body-picker">
+      <h3>マネキンの体型</h3>
+      <div className="chips" role="group" aria-label="身長">
+        {HEIGHTS.map((h) => (
+          <button
+            key={h}
+            type="button"
+            aria-pressed={shape.height === h}
+            onClick={() => onShape({ ...shape, height: h })}
+          >
+            {h}cm
+          </button>
+        ))}
+      </div>
+      <div className="chips" role="group" aria-label="体格">
+        {BUILDS.map((b) => (
+          <button
+            key={b}
+            type="button"
+            aria-pressed={shape.build === b}
+            onClick={() => onShape({ ...shape, build: b })}
+          >
+            {BUILD_NAMES[b]}
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function ThemePicker() {
   const [id, setId] = useState(() => load("theme", ThemeId, DEFAULT_THEME));
   const pick = (t: string) => {
@@ -713,6 +829,9 @@ function Dresser({
   stampNote,
   decide,
   onGoCloset,
+  look,
+  onEdit,
+  onTuck,
 }: {
   clothes: Clothing[];
   /** 服の一覧がまだ届いていない */
@@ -727,6 +846,10 @@ function Dresser({
   stampNote: string;
   decide: ReactNode;
   onGoCloset: () => void;
+  look: { adj: Record<string, Adj>; pose: Pose; tuck: boolean; body: Body };
+  /** 台をタップすると、全画面で指で直す (#83) */
+  onEdit: () => void;
+  onTuck: () => void;
 }) {
   const stage = useRef<HTMLElement>(null);
   const [shelf, setShelf] = useState("top");
@@ -773,7 +896,19 @@ function Dresser({
   return (
     <div className="dresser">
       <div className="stage-wrap">
-        <Stage ref={stage} worn={worn} sparkle={sparkle} pending={pending} />
+        <Stage
+          ref={stage}
+          worn={worn}
+          sparkle={sparkle}
+          pending={pending}
+          adj={look.adj}
+          pose={look.pose}
+          tuck={look.tuck}
+          body={look.body}
+        />
+        {!pending && worn.length > 0 && (
+          <button type="button" className="stage-tap" aria-label="指で直す (大きな画面で)" onClick={onEdit} />
+        )}
         {stamp && (
           <span className="stamp" data-testid="stamp">
             決めた!
@@ -837,6 +972,18 @@ function Dresser({
       </section>
       <div className="dresser-side">
         <LabelRow worn={worn} />
+        {!pending && worn.length > 0 && (
+          <div className="look-row chips">
+            <button type="button" className="ghost small" onClick={onEdit}>
+              指で直す
+            </button>
+            {worn.some((c) => c.kind === "top") && worn.some((c) => c.kind === "bottom") && (
+              <button type="button" className="ghost small" aria-pressed={look.tuck} onClick={onTuck}>
+                インする
+              </button>
+            )}
+          </div>
+        )}
         {(weather || pending) && <GaugeView worn={worn} weather={pending ? null : weather} />}
         <div className="decide-row">
           {decide}
@@ -909,6 +1056,12 @@ function ClosetRoom({
   const [picker, setPicker] = useState(0);
   // からっぽの棚の「○○を撮る」で、撮る欄まで動く (Rin0107/kisekae-closet-archive#49)
   const register = useRef<HTMLDivElement>(null);
+  const editor = useRef<FitEditorHandle>(null);
+  // 印のない服・印を直したい服の型紙合わせ (#81)
+  const [refit, setRefit] = useState<Clothing | null>(null);
+  const refitter = useRef<FitEditorHandle>(null);
+  const refitBox = useRef<HTMLDivElement>(null);
+  const unfitted = clothes.filter((c) => (c.fit ?? null) === null).length;
 
   // しまえたら何が起きたかを知らせる (持ち主 Rin0107/kisekae-closet-archive#49「登録が難しい」)
   const [saved, setSaved] = useState("");
@@ -916,11 +1069,13 @@ function ClosetRoom({
     setNote("");
     setSaved("");
     if (file === null) return setNote("写真を選ぶ");
-    const photo = await shrinkPhoto(file);
+    // 型紙合わせ (#81) が済んでいれば、その写真 (服の箱に切り詰め、背景を白に) と印を送る
+    const fitted = await editor.current?.result();
+    const photo = fitted?.photo ?? (await shrinkPhoto(file));
     const failed = "写真を保存できませんでした。もう一度撮り直してください。";
     if (photo === null) return setNote(failed);
     try {
-      await api.addClothing({ kind: k, warmth, label, photo });
+      await api.addClothing({ kind: k, warmth, label, photo, ...(fitted ? { fit: fitted.fit } : {}) });
     } catch (e) {
       // サーバーの理由 (Exif など) は出さない。ログイン切れ (401) と 500 などは今までどおり投げる
       if (e instanceof ApiError && e.status !== 401 && e.status >= 400 && e.status < 500)
@@ -951,16 +1106,22 @@ function ClosetRoom({
         ))}
       </div>
       <div className="register" data-testid="register" ref={register}>
-        <div className="frame" data-testid="frame" data-kind={kind}>
-          {preview && <Photo src={preview} alt="選んだ写真" />}
-          <svg viewBox="0 0 120 120" aria-hidden="true">
-            <path d={FRAMES[kind]} />
-          </svg>
-        </div>
-        <p className="guide" data-testid="guide">
-          ハンガーにかけて、正面からまっすぐ撮ってください。服が枠に収まるように (顔や部屋は写さない)。
-          <span data-testid="guide-bg">背景は服と違う色に (白い服なら色のある壁や布の前で)。</span>
-        </p>
+        {preview ? (
+          <FitEditor ref={editor} src={preview} kind={kind} mode="new" />
+        ) : (
+          <>
+            <div className="frame" data-testid="frame" data-kind={kind}>
+              <svg viewBox="0 0 120 120" aria-hidden="true">
+                <path d={FRAMES[kind]} />
+              </svg>
+            </div>
+            <p className="guide" data-testid="guide">
+              線に合わせて正面から、まっすぐ撮ってください。ハンガーでも床に置いても大丈夫です
+              (顔や部屋は写さない)。
+              <span data-testid="guide-bg">背景は服と違う色に (白い服なら色のある壁や布の前で)。</span>
+            </p>
+          </>
+        )}
         <div className="photo-buttons">
           <label className="photo-button primary">
             <svg
@@ -1073,6 +1234,45 @@ function ClosetRoom({
         )}
       </div>
       <h2>クローゼット ({clothes.length})</h2>
+      {unfitted > 0 && refit === null && (
+        <p className="fit-nudge" data-testid="fit-nudge">
+          {unfitted}
+          着の服を合わせると、もっと着ている感じになります。服の「合わせる」から、肩先などの印を確かめてください
+          (1 着 10 秒ほど)。
+        </p>
+      )}
+      {refit !== null && (
+        <div className="refit" ref={refitBox} data-testid="refit">
+          <h3>{nameOf(refit)}の印を合わせる</h3>
+          <FitEditor
+            ref={refitter}
+            src={api.photoUrl(refit.id)}
+            kind={refit.kind}
+            mode="refit"
+            initial={refit.fit ?? null}
+          />
+          <div className="row">
+            <button
+              type="button"
+              className="primary"
+              onClick={() => {
+                void (async () => {
+                  const r = await refitter.current?.result();
+                  if (r === null || r === undefined) return;
+                  await api.setFit(refit.id, r.fit);
+                  setRefit(null);
+                  onChange();
+                })().catch(onError);
+              }}
+            >
+              これでよい
+            </button>
+            <button type="button" className="ghost" onClick={() => setRefit(null)}>
+              やめる
+            </button>
+          </div>
+        </div>
+      )}
       <div role="tablist" aria-label="服の種類" className="shelves chips">
         {SHELVES.map((s) => (
           <button
@@ -1113,6 +1313,18 @@ function ClosetRoom({
                 }}
               >
                 消す
+              </button>
+              <button
+                type="button"
+                className={(c.fit ?? null) === null ? "small fit-need" : "ghost small"}
+                onClick={() => {
+                  setRefit(c);
+                  requestAnimationFrame(() =>
+                    refitBox.current?.scrollIntoView({ behavior: "smooth", block: "start" }),
+                  );
+                }}
+              >
+                {(c.fit ?? null) === null ? "合わせる" : "印を直す"}
               </button>
             </li>
           ))}
@@ -1280,7 +1492,12 @@ function CalendarRoom({
                 {md(picked)}のコーデ ({chosen.tempMax}℃ / {chosen.tempMin}℃・湿度 {chosen.humidity}%)
               </p>
               <div className="stage-wrap">
-                <Stage worn={items} caption={`${md(picked)}のコーデ`} />
+                <Stage
+                  worn={items}
+                  caption={`${md(picked)}のコーデ`}
+                  adj={chosen?.adj}
+                  pose={chosen?.pose ?? undefined}
+                />
               </div>
               <LabelRow worn={items} />
               {picked >= day && canPlan(day, picked) ? (

@@ -120,15 +120,31 @@ async function stash(page: Page, kind: string, label: string, warmth: number, pn
   await page
     .getByLabel("写真から選ぶ", { exact: true })
     .setInputFiles({ name: "a.png", mimeType: "image/png", buffer: png });
-  // AC-25-1: 下見は切り抜かれて出る (白い背景の 300×300 から、服のところだけの大きさになる)
-  const preview = page.getByAltText("選んだ写真");
-  await expect
-    .poll(() => preview.evaluate((i: HTMLImageElement) => (i.complete ? i.naturalWidth : 0)))
-    .toBeGreaterThan(0);
-  await expect.poll(() => preview.evaluate((i: HTMLImageElement) => i.naturalWidth)).toBeLessThan(300);
+  // AC-25-1 AC-81-2: 切り抜いた写真を見せて確かめる。AC-81-3: 種類ごとの印を推し量った位置に出し、ドラッグで直せる
+  const editor = page.getByTestId("fit-editor");
+  await expect(editor).toHaveAttribute("data-ready", "true");
+  const dot = editor.getByTestId("dot-0");
+  const before = await dot.boundingBox();
+  if (before === null) throw new Error("印がない");
+  await page.mouse.move(before.x + before.width / 2, before.y + before.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(before.x + before.width / 2 + 6, before.y + before.height / 2 + 4, { steps: 3 });
+  await page.mouse.up();
+  const after = await dot.boundingBox();
+  if (after === null) throw new Error("印がない");
+  expect(Math.round(after.x - before.x)).toBeGreaterThan(2);
+  // 元の位置に戻す (左右対称の絵のまま着せて確かめるため)
+  await page.mouse.move(after.x + after.width / 2, after.y + after.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(before.x + before.width / 2, before.y + before.height / 2, { steps: 3 });
+  await page.mouse.up();
   await page.getByRole("button", { name: `暖かさ ${warmth}` }).click();
   await page.getByLabel("ラベル").fill(label);
+  // AC-81-4: 印 (fit) を一緒に送る
+  const sent = page.waitForRequest((r) => r.url().endsWith("/api/clothes") && r.method() === "POST");
   await page.getByRole("button", { name: "クローゼットにしまう" }).click();
+  const body = (await sent).postDataJSON() as { fit?: { p: number[][] } };
+  expect(body.fit?.p.length).toBeGreaterThanOrEqual(2);
   await expect(page.getByTestId("shelf")).toContainText(label);
 }
 
@@ -180,7 +196,7 @@ test("AC-46-1 AC-47-1: 天気が読めない新しい端末でも、服を着せ
   await expect(page.getByTestId("cut-bad")).toContainText("切り抜けませんでした");
   await page.getByRole("button", { name: "撮り直す" }).click();
   await expect(page.getByTestId("cut-bad")).toHaveCount(0);
-  await expect(page.getByAltText("選んだ写真")).toHaveCount(0);
+  await expect(page.getByTestId("fit-editor")).toHaveCount(0);
   // 色のある服は知らせない
   await stash(page, "トップス", "ピンクニット", 3, await garment(page, "#f2a7bb", "top"));
   await expect(page.getByTestId("cut-bad")).toHaveCount(0);
@@ -293,8 +309,23 @@ test("AC-7-5 AC-9-2 AC-22-3 AC-25-1 AC-25-2 AC-27-3 AC-28-1 AC-28-2 AC-29-2 AC-3
         return { cx: (b.left + b.width / 2 - s.left) / s.width, bottom: (b.bottom - s.top) / s.height };
       }),
     );
-  const feet = await rel('[data-testid="foot"]');
-  const legs = await rel('[data-testid="leg"]');
+  // 片足の見える部分 (clipPath の四角) の真ん中と下の端 (画像の箱は両足ぶんあるので、四角を台の上に写して測る)
+  const feet = await stage.getByTestId("foot").evaluateAll((els) =>
+    els.map((e) => {
+      const img = e.querySelector("image") as SVGImageElement;
+      const rect = e.querySelector("clipPath rect") as SVGRectElement;
+      const m = img.getScreenCTM() as DOMMatrix;
+      const s = (e.closest("figure") as HTMLElement).getBoundingClientRect();
+      const r = rect.getBBox();
+      const pts = [
+        [r.x, r.y],
+        [r.x + r.width, r.y + r.height],
+      ].map(([x, y]) => new DOMPoint(x, y).matrixTransform(m));
+      const [a, b] = pts as [DOMPoint, DOMPoint];
+      return { cx: ((a.x + b.x) / 2 - s.left) / s.width, bottom: (Math.max(a.y, b.y) - s.top) / s.height };
+    }),
+  );
+  const legs = await rel('[data-testid="leg"] ellipse');
   expect(feet).toHaveLength(2);
   for (const [i, f] of feet.entries()) {
     expect(Math.abs((f.cx ?? 0) - (legs[i]?.cx ?? 9))).toBeLessThan(0.08);
@@ -456,4 +487,89 @@ test("見本: 新しいアカウントには 6 種類の見本の服が 1 枚ず
   const pad = await page.locator("main").evaluate((m) => getComputedStyle(m).paddingTop);
   expect(parseFloat(pad)).toBeGreaterThanOrEqual(16);
   await page.screenshot({ path: shot("today-samples") });
+
+  // AC-81-6: 印を直せる (クローゼットの服の「印を直す」→ 型紙合わせ → これでよい で、印だけを送る)
+  await page.getByRole("navigation", { name: "画面" }).getByRole("button", { name: "クローゼット" }).click();
+  // 棚ははじめトップス
+  await page.getByTestId("shelf").getByRole("button", { name: "印を直す" }).first().click();
+  const refit = page.getByTestId("refit");
+  await expect(refit.getByTestId("fit-editor")).toHaveAttribute("data-ready", "true");
+  await refit.getByTestId("dot-1").focus();
+  await page.keyboard.press("ArrowRight");
+  const patched = page.waitForRequest((r) => r.method() === "PATCH" && r.url().includes("/api/clothes/"));
+  await refit.getByRole("button", { name: "これでよい" }).click();
+  const body = (await patched).postDataJSON() as { fit: { p: number[][] } };
+  expect(body.fit.p).toHaveLength(4);
+  await expect(page.getByTestId("refit")).toHaveCount(0);
+});
+
+test("AC-83-1 AC-83-2 AC-83-5 AC-83-6: 台をタップすると全画面で直せる。2 本指で広げると服が大きくなり、決めるとコーデと一緒に保存される", async ({
+  page,
+  baseURL,
+}) => {
+  test.skip(baseURL?.startsWith("https://") === true, "本番・プレビューにはアカウントを作らない");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await authenticator(page);
+  await page.route("https://api.open-meteo.com/**", (r) => r.fulfill({ json: forecast(new Date()) }));
+  await page.goto("./");
+  await page.getByRole("button", { name: "はじめる" }).click();
+  const stage = page.getByTestId("stage");
+  await expect(stage.getByTestId("worn")).not.toHaveCount(0);
+  await page.getByRole("button", { name: "指で直す", exact: true }).click();
+  const edit = page.getByTestId("edit-stage");
+  await expect(edit).toBeVisible();
+  // AC-83-6: 2 本指でページが拡大・スクロールしない
+  await expect(edit.getByTestId("edit-layer")).toHaveCSS("touch-action", "none");
+  const layer = await edit.getByTestId("edit-layer").boundingBox();
+  if (layer === null) throw new Error("台がない");
+  // 胸のあたり (服がある) をタップして選ぶ
+  const cx = layer.x + layer.width / 2;
+  const cy = layer.y + layer.height * 0.3;
+  await page.mouse.click(cx, cy);
+  await expect(edit.getByTestId("edit-name")).toBeVisible();
+  const kind = await edit.getByTestId("edit-sel").count();
+  expect(kind).toBeGreaterThan(0);
+  const name = await edit.getByTestId("edit-name").textContent();
+  const img = edit.locator(`[data-testid="worn"][data-label="${name}"]`);
+  const width = async () => (await img.boundingBox())?.width ?? 0;
+  const w0 = await width();
+  // 2 本指で広げる (CDP のタッチ)
+  const cdp = await page.context().newCDPSession(page);
+  const touch = (type: "touchStart" | "touchMove" | "touchEnd", d: number) =>
+    cdp.send("Input.dispatchTouchEvent", {
+      type,
+      touchPoints:
+        type === "touchEnd"
+          ? []
+          : [
+              { x: cx - d, y: cy, id: 1 },
+              { x: cx + d, y: cy, id: 2 },
+            ],
+    });
+  await touch("touchStart", 20);
+  for (const d of [30, 40, 50]) await touch("touchMove", d);
+  await touch("touchEnd", 0);
+  await expect.poll(width).toBeGreaterThan(w0 * 1.3);
+  // AC-83-7: ボタンでも少しずつ
+  await edit.getByRole("button", { name: "左へ" }).click();
+  await edit.getByRole("button", { name: "できた" }).click();
+  await expect(edit).toHaveCount(0);
+  // 台の上でも大きいまま
+  const small = await stage.locator(`[data-testid="worn"][data-label="${name}"]`).boundingBox();
+  expect(small?.width ?? 0).toBeGreaterThan(0);
+  // AC-83-5: 決めると、直しをコーデと一緒に送る
+  const sent = page.waitForRequest((r) => r.url().endsWith("/api/outfits") && r.method() === "POST");
+  await page.getByRole("button", { name: "これに決めた" }).click();
+  const body = (await sent).postDataJSON() as { adj?: Record<string, number[]> };
+  const adj = Object.values(body.adj ?? {})[0];
+  expect(adj?.[2]).toBeGreaterThan(1.3);
+  expect(adj?.[0]).toBeLessThan(0);
+  // 開き直しても、決めたコーデは直したまま
+  const before = await stage.locator(`[data-testid="worn"][data-label="${name}"]`).getAttribute("transform");
+  await page.reload();
+  await expect(stage.locator(`[data-testid="worn"][data-label="${name}"]`)).toHaveAttribute(
+    "transform",
+    before ?? "",
+  );
+  await expect(page.getByTestId("stamp")).toBeVisible();
 });
