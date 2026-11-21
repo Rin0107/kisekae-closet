@@ -144,6 +144,10 @@ describe("ログインの前", () => {
     await click(button(el, "はじめる"));
     expect(pk.register).toHaveBeenCalledWith("わたし");
     expect(el.querySelector('section[aria-label="クローゼット"]')).not.toBeNull();
+    // 見本の写真が読めない (このテストの fetch は 404) ときは、入らなかった枚数を一言知らせる
+    expect(el.querySelector('[role="alert"]')?.textContent).toBe(
+      "見本の服を 6 枚入れられませんでした。服は「クローゼット」から入れられます。",
+    );
     document.body.replaceChildren();
     routes.me = () => [401, { error: "x" }];
     el = await render();

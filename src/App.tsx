@@ -19,7 +19,7 @@ import { api, ApiError, type Clothing, type Outfit } from "./client";
 import { advice, BAND_NAMES, dressIn, gauge, takeOff, wear } from "./outfit";
 import { login, register } from "./passkey";
 import { recommend } from "./recommend";
-import { addSamples } from "./samples";
+import { addSamples, SAMPLES } from "./samples";
 import { shrinkPhoto } from "./shrink";
 import { clearAll, forget, load, save } from "./storage";
 import { applyTheme, DEFAULT_THEME, ThemeId, themeById, THEMES } from "./theme";
@@ -99,6 +99,8 @@ type Wx =
 
 export function App() {
   const [state, setState] = useState<"loading" | "out" | "in">("loading");
+  // 始めたときの一言 (見本の服が入りきらなかったなど)
+  const [notice, setNotice] = useState("");
   // この端末でログインして使ったことがあれば (前回の予報がある)、天気はログインの確かめと同時に読み始める。
   // 使ったことのない端末では、ログインの前に外へ通信しない (確かめのあと Home が読む)
   const [first] = useState<FirstForecast | null>(() => {
@@ -117,15 +119,27 @@ export function App() {
     api.me().then(() => setState("in"), out);
   }, [out]);
   if (state === "loading") return <main aria-busy="true" />;
-  return state === "in" ? <Home first={first} onOut={out} /> : <Welcome onIn={() => setState("in")} />;
+  return state === "in" ? (
+    <Home first={first} onOut={out} notice={notice} />
+  ) : (
+    <Welcome
+      onIn={(n) => {
+        setNotice(n);
+        setState("in");
+      }}
+    />
+  );
 }
 
-function Welcome({ onIn }: { onIn: () => void }) {
+function Welcome({ onIn }: { onIn: (notice: string) => void }) {
   const [name, setName] = useState("");
   const [error, setError] = useState("");
-  const run = (f: () => Promise<void>) => () => {
+  const run = (f: () => Promise<string | undefined>) => () => {
     setError("");
-    f().then(onIn, (e: unknown) => setError(message(e)));
+    f().then(
+      (n) => onIn(n ?? ""),
+      (e: unknown) => setError(message(e)),
+    );
   };
   return (
     <main className="welcome">
@@ -143,12 +157,22 @@ function Welcome({ onIn }: { onIn: () => void }) {
         onClick={run(async () => {
           await register(name.trim() || "kisekae-closet");
           // 新しいアカウントには、見本の服を 1 セット入れておく
-          await addSamples();
+          const n = await addSamples();
+          if (n < SAMPLES.length)
+            return `見本の服を ${SAMPLES.length - n} 枚入れられませんでした。服は「クローゼット」から入れられます。`;
+          return undefined;
         })}
       >
         はじめる
       </button>
-      <button type="button" className="ghost" onClick={run(login)}>
+      <button
+        type="button"
+        className="ghost"
+        onClick={run(async () => {
+          await login();
+          return undefined;
+        })}
+      >
         パスキーでログイン
       </button>
       {error && <p role="alert">{error}</p>}
@@ -177,7 +201,15 @@ const TABS: { id: Tab; name: string }[] = [
   { id: "calendar", name: "カレンダー" },
 ];
 
-function Home({ first, onOut }: { first: FirstForecast | null; onOut: () => void }) {
+function Home({
+  first,
+  onOut,
+  notice = "",
+}: {
+  first: FirstForecast | null;
+  onOut: () => void;
+  notice?: string;
+}) {
   const [clothes, setClothes] = useState<Clothing[]>([]);
   const [outfits, setOutfits] = useState<Outfit[]>([]);
   // 服とコーデが 1 度届くまでは、アバターを下着姿にせず、ゲージも寒いにしない (#28)
@@ -193,7 +225,7 @@ function Home({ first, onOut }: { first: FirstForecast | null; onOut: () => void
   // null: まだ触っていない (決めたコーデか、おすすめを着る)
   const [worn, setWorn] = useState<Clothing[] | null>(null);
   const [sparkle, setSparkle] = useState(0);
-  const [error, setError] = useState("");
+  const [error, setError] = useState(notice);
   // 天気が読めないうちに決めたコーデ (#46)。今日より前の日のものは、もう保存できないので捨てる
   const [pending, setPending] = useState<Pending | null>(() => {
     const p = load("pending", Pending.nullable(), null);
