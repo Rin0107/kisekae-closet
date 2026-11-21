@@ -24,6 +24,8 @@ export interface Slot {
  */
 export const BODY = {
   /** 下着の上の端 (首の付け根)・下の端 (腰の下) */
+  /** あごの下の端 (2026-11-20 に絵を測った。ここから下は首で幅 9% ほど) */
+  chin: 13.5,
   neck: 16.3,
   hip: 52,
   /** 下着の左右の端 (一番広いところ) */
@@ -51,12 +53,13 @@ export const BODICE_SHARE = 0.52;
  * shoes は写真の形が分からないときの目安 (着せるときは shoeFeet で左右の足に分ける、#32)。
  * outer はトップスより一回り大きく、少し下から始める (中のトップスの襟元がのぞく、#33)。
  */
+// トップス・ワンピース・アウターは BODY.chin より下から始める (評価10、あごを覆わない)
 export const SLOTS: Record<string, Slot> = {
   // くつはボトムスの裾より前 (長ズボンでも甲が見える、#39)
   bottom: { top: 42, left: 26, width: 48, height: 50, z: 1, fit: "width" },
   shoes: { top: 86, left: 22, width: 56, height: 8, z: 2, fit: "box" },
-  top: { top: 12.5, left: 16, width: 68, height: 36, z: 3, fit: "width" },
-  dress: { top: 12.5, left: 16, width: 68, height: 56, z: 3, fit: "width" },
+  top: { top: 14, left: 16, width: 68, height: 36, z: 3, fit: "width" },
+  dress: { top: 14, left: 16, width: 68, height: 56, z: 3, fit: "width" },
   outer: { top: 14.2, left: 13, width: 74, height: 42, z: 4, fit: "width" },
   accessory: { top: 38, left: 72, width: 24, height: 17, z: 5, fit: "box" },
 };
@@ -70,11 +73,15 @@ export interface Box {
   left: number;
   width: number;
   height: number | null;
+  /** 写真の高さのうち、下から隠す割合 (0〜1)。無ければ隠さない */
+  clip?: number;
 }
 
 /** ボトムスの幅の範囲 (%)。下は腰の下着を覆う幅 (写真の幅の 3/4 が腰)、上は太く見えすぎない幅。 */
 export const BOTTOM_MIN_WIDTH = 46;
 export const BOTTOM_MAX_WIDTH = 60;
+/** 見えるボトムスの裾の下限 (%)。足の裏の 1% 上 (くつの中に隠れる、評価10) */
+export const HEM_MAX = BODY.sole - 1;
 
 /**
  * 服を置く箱。ratio は写真の 縦 ÷ 横 (分からなければ null)。
@@ -87,7 +94,11 @@ export function place(kind: string, ratio: number | null): Box | null {
   if (kind === "bottom" && ratio !== null && ratio > 0) {
     const want = (BODY.ankle - s.top) / (STAGE_RATIO * ratio);
     const width = Math.min(BOTTOM_MAX_WIDTH, Math.max(BOTTOM_MIN_WIDTH, want));
-    return { top: s.top, left: 50 - width / 2, width, height: null };
+    const box: Box = { top: s.top, left: 50 - width / 2, width, height: null };
+    // 縦長の写真は腰を覆う幅より細くできず丈が伸びる。写真は曲げず、足の裏より下に出る分を下から隠す (評価10)
+    const height = width * STAGE_RATIO * ratio;
+    const end = s.top + height;
+    return end > HEM_MAX ? { ...box, clip: (end - HEM_MAX) / height } : box;
   }
   return { top: s.top, left: s.left, width: s.width, height: s.fit === "box" ? s.height : null };
 }
@@ -141,6 +152,16 @@ const COUNTED = new Set(["top", "bottom", "dress", "outer"]);
 
 export type Band = "cold" | "ok" | "hot";
 export const BAND_NAMES: Record<Band, string> = { cold: "寒い", ok: "ちょうどいい", hot: "暑い" };
+
+/** いまの服でどうすればいいかの一言 (数字は出さない)。 */
+export const ADVICE: Record<Band, string> = {
+  cold: "少し寒そう。もう1枚重ねよう",
+  ok: "ちょうどいい。このままでOK",
+  hot: "少し暑そう。1枚減らそう",
+};
+export function advice(b: Band): string {
+  return ADVICE[b];
+}
 
 export interface Gauge {
   band: Band;

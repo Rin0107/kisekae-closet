@@ -10,7 +10,11 @@ export default defineConfig({
   reporter: process.env.CI ? "github" : "list",
   // パスキーは IP では使えないので localhost (wrangler.jsonc の ORIGIN と同じ)
   use: { baseURL: base ?? "http://localhost:8787", trace: "retain-on-failure" },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  // 持ち主 (Rin0107/kisekae-closet-archive#49): スマホが最優先。まず iPhone の大きさ・タッチで、次に広い画面で
+  projects: [
+    { name: "iphone", use: { ...devices["iPhone 13"], browserName: "chromium" } },
+    { name: "chromium", use: { ...devices["Desktop Chrome"] } },
+  ],
   webServer: base
     ? undefined
     : {
