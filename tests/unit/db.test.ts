@@ -110,8 +110,8 @@ describe("服とコーデ", () => {
     expect(await s.addClothing("a", shirt("s1"), NOW)).toBe(true);
     expect(await s.addClothing("a", shirt("s0", { kind: "bottom" }), NOW)).toBe(true);
     expect(await s.listClothes("a")).toEqual([
-      { id: "s0", kind: "bottom", warmth: 2, label: "白シャツ", createdAt: NOW },
-      { id: "s1", kind: "top", warmth: 2, label: "白シャツ", createdAt: NOW },
+      { id: "s0", kind: "bottom", warmth: 2, label: "白シャツ", fit: null, createdAt: NOW },
+      { id: "s1", kind: "top", warmth: 2, label: "白シャツ", fit: null, createdAt: NOW },
     ]);
     expect(await s.getPhoto("a", "s1")).toEqual({ photo, photoType: "image/jpeg" });
     expect(await s.updateClothing("a", "s1", { label: "青" })).toBe(true);
@@ -143,6 +143,37 @@ describe("服とコーデ", () => {
     expect((await s.listOutfits("a", 10)).map((o) => o.itemIds)).toEqual([[], ["s2"]]);
     expect(await s.deleteOutfit("a", "o1")).toBe(true);
     expect(await s.deleteOutfit("a", "o1")).toBe(false);
+  });
+
+  test("AC-80-1: 型紙の印 (fit) を足すときと変えるときに保存し、ほかの欄だけ変えても残る", async () => {
+    const { s } = await setup("a");
+    await s.addClothing("a", { ...shirt("s1"), fit: '{"v":1}' }, NOW);
+    await s.addClothing("a", shirt("s2"), NOW);
+    expect((await s.listClothes("a")).map((c) => c.fit)).toEqual(['{"v":1}', null]);
+    expect(await s.updateClothing("a", "s2", { fit: '{"v":2}' })).toBe(true);
+    expect(await s.updateClothing("a", "s2", { label: "x" })).toBe(true);
+    expect((await s.listClothes("a")).map((c) => c.fit)).toEqual(['{"v":1}', '{"v":2}']);
+    expect((await s.exportClothes("a")).map((c) => c.fit)).toEqual(['{"v":1}', '{"v":2}']);
+  });
+
+  test("AC-80-2: コーデの直し (adj は服ごと・pose はコーデ) を保存し、直していない服は入らない", async () => {
+    const { s } = await setup("a");
+    await s.addClothing("a", shirt("s1"), NOW);
+    await s.addClothing("a", shirt("s2"), NOW);
+    await s.addOutfit("a", { ...day("o1", ["s1", "s2"]), adj: { s1: "[1,0,1,0]" }, pose: '{"s":1}' }, NOW);
+    await s.addOutfit("a", day("o2", ["s1"], "2026-11-16"), NOW);
+    const list = await s.listOutfits("a", 10);
+    expect(list.map((o) => [o.id, o.adj, o.pose])).toEqual([
+      ["o2", {}, null],
+      ["o1", { s1: "[1,0,1,0]" }, '{"s":1}'],
+    ]);
+  });
+
+  test("AC-80-3: ほかの人の服の印は変えられない", async () => {
+    const { s } = await setup("a", "b");
+    await s.addClothing("a", { ...shirt("s1"), fit: '{"v":1}' }, NOW);
+    expect(await s.updateClothing("b", "s1", { fit: '{"v":9}' })).toBe(false);
+    expect((await s.listClothes("a"))[0]?.fit).toBe('{"v":1}');
   });
 
   test("Spec_OwnerOnly: ほかの人の服・写真・コーデは読めず、変えられず、消せず、コーデに入れられない", async () => {
@@ -209,7 +240,16 @@ describe("服とコーデ", () => {
     const { s } = await setup("a");
     await s.addClothing("a", shirt("s1"), NOW);
     expect(await s.exportClothes("a")).toEqual([
-      { id: "s1", kind: "top", warmth: 2, label: "白シャツ", createdAt: NOW, photo, photoType: "image/jpeg" },
+      {
+        id: "s1",
+        kind: "top",
+        warmth: 2,
+        label: "白シャツ",
+        fit: null,
+        createdAt: NOW,
+        photo,
+        photoType: "image/jpeg",
+      },
     ]);
   });
 

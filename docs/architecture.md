@@ -44,10 +44,10 @@
 | POST | `/api/auth/logout` | Cookie を消す |
 | GET | `/api/me` | `{signedIn: true}` か 401 |
 | DELETE | `/api/account` | アカウントと全データを消す |
-| GET/POST | `/api/clothes` | 一覧 (写真なし) / `{kind, warmth, label, photo(base64)}` |
+| GET/POST | `/api/clothes` | 一覧 (写真なし) / `{kind, warmth, label, photo(base64), fit?}`。fit は型紙の印 `{v:1, p:[[x,y]…2〜6], at?}` (割合、小数 4 桁に丸める) |
 | GET | `/api/clothes/:id/photo` | 写真 (本人だけ、no-store) |
-| PATCH/DELETE | `/api/clothes/:id` | `{kind?, warmth?, label?}` / 消す |
-| GET/POST | `/api/outfits` | `?limit=` / `{wornOn, itemIds, tempMax, tempMin, humidity, precip}` |
+| PATCH/DELETE | `/api/clothes/:id` | `{kind?, warmth?, label?, fit?}` / 消す |
+| GET/POST | `/api/outfits` | `?limit=` / `{wornOn, itemIds, tempMax, tempMin, humidity, precip, adj?, pose?}`。adj は `{服の ID: [横 cm, 縦 cm, 倍率, 角度]}` (コーデの服だけ)、pose はマネキンの直し `{s, r, dx, dy, arm:[左,右], leg:[左,右]}` (#80) |
 | DELETE | `/api/outfits/:id` | 消す |
 | GET | `/api/export` | 服 (写真つき) とコーデの JSON |
 
@@ -73,6 +73,7 @@ Cloudflare で動くのは版固定の wrangler だけ (工場の書いたコー
 - 2026-11-19 服を幅で合わせて重ねるようにした (#26)。体の絵の画素を測った目印を `outfit.ts` の `BODY` に置き、`SLOTS` はそれに合わせた。zod の JIT を切った (`src/zod-setup.ts`、new Function の下調べが CSP 違反として報告されるため、#25)
 - 2026-11-20 袖の先が台の外に出るなら、角度を腕のまま、付け根を中心に袖を小さくして収める (`outfit.ts` の `sleeveFit`、`SCALE_MIN` まで)。小さくしても出るときだけ角度を内へ戻す (#19)
 - 2026-11-21 写真の袖の向き (`measureSleeve` の `angle`) は、付け根から重心へではなく、袖の帯の画素の主軸 (付け根から袖の先へ向けたもの) で測る。真下に垂れた長袖を 0° と測る。ただし帯が細長いとき (分散の比が `SLEEVE_LONG` 8 以上) だけ。太く短い帯 (広げた半袖) の主軸は袖の幅の向きになりうるので、そのときは付け根から重心への向きのまま (e2e AC-44-1 を保つ、試行 1・2 が落ちた理由)
+- 2026-11-21 着せ替えを v2 に作り直すと持ち主が決めた (`docs/spec-v2-fitting.md`)。写真を体に合わせるのをやめ、登録で型紙の印を確かめ、詳細のないマネキンの体を服に合わせて動かす。印は服の欄 (`clothes.fit`)、指の直しはコーデの欄 (`outfit_items.adj`・`outfits.pose`) に置く (migrations/0002_fit.sql、#80)。服の欄には服そのものの情報だけを置く (持ち主)
 
 ## 天気が読めないうちに決めたコーデ (#46)
 D1 のコーデはその日の気温・湿度・降水量を必ず持つ (migrations は守りの部分で、欄を空にできない)。
