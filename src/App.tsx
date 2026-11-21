@@ -11,6 +11,7 @@ import {
 } from "react";
 import { z } from "zod";
 import { Mannequin, Stage } from "./Avatar";
+import { FitEditor, type FitEditorHandle } from "./FitEditor";
 import { dress, STAGE } from "./fit";
 import { cutoutOk, forgetCutout } from "./cutout";
 import { KindIcon } from "./KindIcon";
@@ -909,6 +910,12 @@ function ClosetRoom({
   const [picker, setPicker] = useState(0);
   // からっぽの棚の「○○を撮る」で、撮る欄まで動く (Rin0107/kisekae-closet-archive#49)
   const register = useRef<HTMLDivElement>(null);
+  const editor = useRef<FitEditorHandle>(null);
+  // 印のない服・印を直したい服の型紙合わせ (#81)
+  const [refit, setRefit] = useState<Clothing | null>(null);
+  const refitter = useRef<FitEditorHandle>(null);
+  const refitBox = useRef<HTMLDivElement>(null);
+  const unfitted = clothes.filter((c) => (c.fit ?? null) === null).length;
 
   // しまえたら何が起きたかを知らせる (持ち主 Rin0107/kisekae-closet-archive#49「登録が難しい」)
   const [saved, setSaved] = useState("");
@@ -916,11 +923,13 @@ function ClosetRoom({
     setNote("");
     setSaved("");
     if (file === null) return setNote("写真を選ぶ");
-    const photo = await shrinkPhoto(file);
+    // 型紙合わせ (#81) が済んでいれば、その写真 (服の箱に切り詰め、背景を白に) と印を送る
+    const fitted = await editor.current?.result();
+    const photo = fitted?.photo ?? (await shrinkPhoto(file));
     const failed = "写真を保存できませんでした。もう一度撮り直してください。";
     if (photo === null) return setNote(failed);
     try {
-      await api.addClothing({ kind: k, warmth, label, photo });
+      await api.addClothing({ kind: k, warmth, label, photo, ...(fitted ? { fit: fitted.fit } : {}) });
     } catch (e) {
       // サーバーの理由 (Exif など) は出さない。ログイン切れ (401) と 500 などは今までどおり投げる
       if (e instanceof ApiError && e.status !== 401 && e.status >= 400 && e.status < 500)
@@ -951,16 +960,22 @@ function ClosetRoom({
         ))}
       </div>
       <div className="register" data-testid="register" ref={register}>
-        <div className="frame" data-testid="frame" data-kind={kind}>
-          {preview && <Photo src={preview} alt="選んだ写真" />}
-          <svg viewBox="0 0 120 120" aria-hidden="true">
-            <path d={FRAMES[kind]} />
-          </svg>
-        </div>
-        <p className="guide" data-testid="guide">
-          ハンガーにかけて、正面からまっすぐ撮ってください。服が枠に収まるように (顔や部屋は写さない)。
-          <span data-testid="guide-bg">背景は服と違う色に (白い服なら色のある壁や布の前で)。</span>
-        </p>
+        {preview ? (
+          <FitEditor ref={editor} src={preview} kind={kind} mode="new" />
+        ) : (
+          <>
+            <div className="frame" data-testid="frame" data-kind={kind}>
+              <svg viewBox="0 0 120 120" aria-hidden="true">
+                <path d={FRAMES[kind]} />
+              </svg>
+            </div>
+            <p className="guide" data-testid="guide">
+              線に合わせて正面から、まっすぐ撮ってください。ハンガーでも床に置いても大丈夫です
+              (顔や部屋は写さない)。
+              <span data-testid="guide-bg">背景は服と違う色に (白い服なら色のある壁や布の前で)。</span>
+            </p>
+          </>
+        )}
         <div className="photo-buttons">
           <label className="photo-button primary">
             <svg
@@ -1073,6 +1088,45 @@ function ClosetRoom({
         )}
       </div>
       <h2>クローゼット ({clothes.length})</h2>
+      {unfitted > 0 && refit === null && (
+        <p className="fit-nudge" data-testid="fit-nudge">
+          {unfitted}
+          着の服を合わせると、もっと着ている感じになります。服の「合わせる」から、肩先などの印を確かめてください
+          (1 着 10 秒ほど)。
+        </p>
+      )}
+      {refit !== null && (
+        <div className="refit" ref={refitBox} data-testid="refit">
+          <h3>{nameOf(refit)}の印を合わせる</h3>
+          <FitEditor
+            ref={refitter}
+            src={api.photoUrl(refit.id)}
+            kind={refit.kind}
+            mode="refit"
+            initial={refit.fit ?? null}
+          />
+          <div className="row">
+            <button
+              type="button"
+              className="primary"
+              onClick={() => {
+                void (async () => {
+                  const r = await refitter.current?.result();
+                  if (r === null || r === undefined) return;
+                  await api.setFit(refit.id, r.fit);
+                  setRefit(null);
+                  onChange();
+                })().catch(onError);
+              }}
+            >
+              これでよい
+            </button>
+            <button type="button" className="ghost" onClick={() => setRefit(null)}>
+              やめる
+            </button>
+          </div>
+        </div>
+      )}
       <div role="tablist" aria-label="服の種類" className="shelves chips">
         {SHELVES.map((s) => (
           <button
@@ -1113,6 +1167,18 @@ function ClosetRoom({
                 }}
               >
                 消す
+              </button>
+              <button
+                type="button"
+                className={(c.fit ?? null) === null ? "small fit-need" : "ghost small"}
+                onClick={() => {
+                  setRefit(c);
+                  requestAnimationFrame(() =>
+                    refitBox.current?.scrollIntoView({ behavior: "smooth", block: "start" }),
+                  );
+                }}
+              >
+                {(c.fit ?? null) === null ? "合わせる" : "印を直す"}
               </button>
             </li>
           ))}

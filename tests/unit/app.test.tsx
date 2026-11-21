@@ -578,13 +578,14 @@ describe("服をしまう", () => {
     await click(button(el, "アウター"));
     expect(el.querySelector('[data-testid="frame"]')?.getAttribute("data-kind")).toBe("outer");
     expect(el.querySelector('[data-testid="guide"]')?.textContent).toContain(
-      "ハンガーにかけて、正面からまっすぐ",
+      "線に合わせて正面から、まっすぐ",
     );
     // 写真を選ぶまで「しまう」は押せない (Rin0107/kisekae-closet-archive#49)
     expect((button(el, "クローゼットにしまう") as HTMLButtonElement).disabled).toBe(true);
     const f = new File(["x"], "a.jpg", { type: "image/jpeg" });
     await pickFile(el, [f]);
-    expect(el.querySelector('[data-testid="frame"] img')?.getAttribute("src")).toBe("blob:x");
+    // 選んだ写真は型紙合わせの欄に出る (#81)
+    expect(el.querySelector('[data-testid="fit-editor"]')).not.toBeNull();
     sh.shrinkPhoto.mockResolvedValue(null);
     await click(button(el, "クローゼットにしまう"));
     expect(el.querySelector('[role="alert"]')?.textContent).toBe(

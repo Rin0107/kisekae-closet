@@ -32,7 +32,11 @@ export async function shrinkPhoto(file: Blob): Promise<string | null> {
   canvas.getContext("2d")?.drawImage(img, 0, 0, w, h);
   img.close();
   const blob = await encodeSmall((type, q) => new Promise((ok) => canvas.toBlob(ok, type, q)));
-  if (blob === null) return null;
+  return blob === null ? null : toBase64(blob);
+}
+
+/** 書いた写真から付け足しの情報を落として base64 にする。 */
+export async function toBase64(blob: Blob): Promise<string> {
   let s = "";
   for (const b of stripMetadata(new Uint8Array(await blob.arrayBuffer()))) s += String.fromCharCode(b);
   return btoa(s);

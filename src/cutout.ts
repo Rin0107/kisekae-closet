@@ -9,6 +9,9 @@ export interface Box {
   h: number;
 }
 
+/** 四辺がこれより白い (どの色も) 写真は、白い地に置いた服とみなす。 */
+export const WHITE = 250;
+
 /** 背景とみなす色の差 (RGB の距離の 2 乗の上限)。 */
 export const TOLERANCE = 48 * 48 * 3;
 
@@ -99,6 +102,9 @@ export function cutout(px: Uint8ClampedArray, w: number, h: number, tol = TOLERA
   }
   const { bg } = m;
   let count = m.count;
+  // 白い地 (型紙合わせで背景を白にして送った写真、#81) は、服に囲まれた白のかたまりも背景 (腕と胴のすき間など)。
+  // 小さな白 (ボタン・柄) は服のまま
+  if (st.mean.every((v) => v >= WHITE) && st.spread <= TIGHT_MIN) count += whiteHoles(px, w, h, bg);
   // 服の上に細く突き出たもの (ハンガーのフック) は外す。上の行から、細くて真ん中にある行だけを背景にし、幅のある行で止める
   for (let y = 0; y < h; y++) {
     let c = 0;
@@ -158,6 +164,38 @@ export function cutout(px: Uint8ClampedArray, w: number, h: number, tol = TOLERA
   return { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
 }
 
+/** 服に囲まれた白のかたまりのうち、写真の MIN_HOLE (と 16 画素) より大きいものを背景にする。背景にした画素の数を返す。 */
+function whiteHoles(px: Uint8ClampedArray, w: number, h: number, bg: Uint8Array): number {
+  const n = w * h;
+  const white = (i: number) => bg[i] === 0 && [0, 1, 2].every((c) => (px[i * 4 + c] as number) >= WHITE);
+  const seen = new Uint8Array(n);
+  const part = new Int32Array(n);
+  let added = 0;
+  for (let s = 0; s < n; s++) {
+    if (seen[s] === 1 || !white(s)) continue;
+    seen[s] = 1;
+    part[0] = s;
+    let tail = 1;
+    for (let head = 0; head < tail; head++) {
+      const i = part[head] as number;
+      const x = i % w;
+      for (const j of [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, i - w, i + w])
+        if (j >= 0 && j < n && seen[j] === 0 && white(j)) {
+          seen[j] = 1;
+          part[tail++] = j;
+        }
+    }
+    if (tail >= Math.max(n * MIN_HOLE, 16)) {
+      for (let k = 0; k < tail; k++) bg[part[k] as number] = 1;
+      added += tail;
+    }
+  }
+  return added;
+}
+
+/** 服に囲まれた白を背景とみなす大きさ (写真の画素の割合)。ボタンより大きく、腕と胴のすき間より小さい。 */
+export const MIN_HOLE = 0.004;
+
 /**
  * 切り抜いたあと、透明になった (背景だった) 画素がこの割合より少なければ、切り抜けなかったとみなす (#47)。
  * 白い背景の白い服などで背景が残ると、写真全体の四角が体にかぶる。撮るときに知らせて撮り直しを選べるようにする。
@@ -182,7 +220,7 @@ export const isLocal = (src: string) => src.startsWith("blob:") || src.startsWit
  * 写真を描ける形で読む。blob:・data: は fetch しない: CSP の connect-src に blob: はなく (足さない)、
  * fetch すると CSP 違反になる (#25)。img-src は blob: を許すので <img> で読む。サーバーの写真は同じ origin から fetch する。
  */
-async function decode(
+export async function decodeImage(
   src: string,
 ): Promise<{ img: CanvasImageSource; w: number; h: number; done: () => void } | null> {
   if (isLocal(src)) {
@@ -236,7 +274,7 @@ const plainCut = (src: string): Cut => ({ url: src, ok: true, full: null, box: n
 
 async function render(src: string): Promise<Cut> {
   const plain = plainCut(src);
-  const d = await decode(src);
+  const d = await decodeImage(src);
   if (d === null) return plain;
   const { img } = d;
   const s = Math.min(1, CUT_SIDE / Math.max(d.w, d.h));

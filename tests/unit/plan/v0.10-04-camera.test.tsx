@@ -155,7 +155,8 @@ test("AC-3: どちらのボタンで選んでも、選んだ写真が枠に出�
     );
     const f = new File(["x"], "a.jpg", { type: "image/jpeg" });
     await pickFile(input ?? null, [f]);
-    expect(el.querySelector('[data-testid="frame"] img'), `${capture}`).not.toBeNull();
+    // 着せ替え v2 (#81): 選んだ写真は型紙合わせの欄に出る
+    expect(el.querySelector('[data-testid="fit-editor"]'), `${capture}`).not.toBeNull();
     await click(button(el, "クローゼットにしまう"));
     expect(sh.shrinkPhoto).toHaveBeenLastCalledWith(f);
   }
