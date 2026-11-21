@@ -234,7 +234,7 @@ export const HAT_BRIM = 1.25;
 /** くつの写真の左右の端を重ねる幅 (cm)。横から・斜めから撮ったくつが多いので、足の幅より長さに近い */
 export const SHOE_W = 15;
 /** アウターの前を開ける幅の半分 (cm)。 */
-export const OPEN_GAP = 2.5;
+export const OPEN_GAP = 1.8;
 
 export interface Limb {
   /** 付け根 (台の cm) */

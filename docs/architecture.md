@@ -17,7 +17,8 @@
 - **天気の読み直し** (#31): 読めなければ `weather.ts` の `fetchForecastRetrying` が 1 秒・3 秒おいて 2 回まで読み直す (`RETRY_DELAYS_MS`。回数に上限があり、無限に通信しない)。それでも読めなければ画面の「もう一度読む」で、押したときだけまた上限まで読む。待つのは `sleep.ts` (テストで差しかえる)。それでも読めず前回の予報もなければ、その月のふだんの天気 (`normalWeather`、東京の平年に近い値) でおすすめを着せ、「この時期のふだんの天気でえらびました」と添える (評価 9)
 - **写真の送り方**: 端末で送る前に Exif・XMP・IPTC を落とす (iPhone の Safari の JPEG は canvas から書いても Exif が付くため。src/shrink.ts の stripMetadata)
 - **切り抜き**: 表示するときに端末で、写真の四辺につながった背景の色を透明にして服に切り詰める (`src/cutout.ts`)。サーバーには元の写真だけ。まず背景のむらから決めた狭い差でたどり (白い壁の前の淡い色の服を消さない)、背景がほとんど消えなければ (むらのある床など) 広い差でやり直す (#27、Rin0107/kisekae-closet-archive#49)。選んだばかりの写真 (blob:) は fetch せず <img> で読む (CSP の connect-src に blob: を足さない、#25)。服の上の細い突き出し (ハンガーのフック) は外す。服から離れた小さなかけらは消す (`MIN_PART`)
-- **ボトムスの丈**: 縦長の写真は腰を覆う幅 (`BOTTOM_MIN_WIDTH`) より細くできず丈が伸びる。写真は曲げず、足の裏より下に出る分は clip で下から隠す (`HEM_MAX` = 足の裏の 1% 上、`Box.clip`、評価10)
+- **型紙の印** (`fit`、#80): 服そのものの印 (肩先・袖口・ウエスト・裾・くつの底の端・こものの両端と置き場所)。写真の幅・高さに対する割合。印のない服は、切り抜いた形から推し量る (`fit.ts` の `guessFit`)。保存した写真の上の印を、切り詰めた写真の上に直して使う (`cropFit`)
+- **着せる** (着せ替え v2、`docs/spec-v2-fitting.md`): `fit.ts` の `dress`。台は cm の世界。服は印 2 点を体の 2 点に重ねる相似変換だけ (曲げない)。マネキンの腕・脚は服に合わせて動く。床より長い裾は床で隠す
 
 ## 層と依存の向き
 - Worker (`src/worker/`)
@@ -29,10 +30,10 @@
   - `photo.ts` (守り) — 写真の検査 (WebP/JPEG・300KB・Exif/XMP/IPTC なし)
   - `security.ts` (守り) — 守りのヘッダー
 - 画面 (`src/`)
-  - 決まり (純粋な関数): `theme.ts` (色の組・コントラスト)・`recommend.ts`・`outfit.ts` (着せ替え・ゲージ)・`calendar.ts` (月のマス・天気の近さ)・`cutout.ts` の `cutout`・`weather.ts`・`shrink.ts` の `fitSize`/`encodeSmall`
+  - 決まり (純粋な関数): `theme.ts` (色の組・コントラスト)・`recommend.ts`・`outfit.ts` (着せ替え・ゲージ)・`calendar.ts` (月のマス・天気の近さ)・`fit.ts` (cm の幾何・印・着せる)・`cutout.ts` の `cutout`・`weather.ts`・`shrink.ts` の `fitSize`/`encodeSmall`
   - 通信: `client.ts` (zod で答えを検査)・`passkey.ts` (@simplewebauthn/browser)
   - 端末の保存: `storage.ts` (選んだ市とテーマだけ)
-  - UI: `App.tsx` (今日・クローゼット・カレンダーの 3 画面と下のタブバー)・`Avatar.tsx` (アバターの台)・`Photo.tsx` (切り抜いた写真)
+  - UI: `App.tsx` (今日・クローゼット・カレンダーの 3 画面と下のタブバー)・`Avatar.tsx` (アバターの台: マネキンと服の SVG)・`Photo.tsx` (切り抜いた写真)
 
 ## API
 | 方法 | 道 | 中身 |
