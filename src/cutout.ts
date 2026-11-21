@@ -77,17 +77,18 @@ function flood(px: Uint8ClampedArray, w: number, h: number, st: ReturnType<typeo
 
 /**
  * px (RGBA) の背景を透明にする。背景の色は四辺の画素の平均。四辺から、背景の色に近い画素を塗りつぶしでたどる。
- * 服がほとんど残らなければ (MIN_KEEP)、背景のばらつきの 3 倍 (下限 TIGHT_MIN) までの差でやり直し、服が多く残るほうを使う。
+ * まず背景のばらつきの 3 倍 (下限 TIGHT_MIN、上限 tol) までの狭い差でたどる (白い壁の前の淡い色の服を消さない)。
+ * それで消えた背景が MIN_CLEAR より少なければ (背景にむらがある)、広い差 tol でやり直し、服が MIN_KEEP 以上残るならそちらを使う。
  * 残った (服の) 画素を囲む箱を返す。全部が背景なら null (切り抜かない: px は元のまま)。
  */
 export function cutout(px: Uint8ClampedArray, w: number, h: number, tol = TOLERANCE): Box | null {
   const n = w * h;
   const st = borderStats(px, w, h);
-  let m = flood(px, w, h, st, tol);
-  if (n - m.count < n * MIN_KEEP) {
-    const tight = Math.min(tol, Math.max(TIGHT_MIN, 9 * st.spread));
-    const e = flood(px, w, h, st, tight);
-    if (e.count < m.count) m = e;
+  const tight = Math.min(tol, Math.max(TIGHT_MIN, 9 * st.spread));
+  let m = flood(px, w, h, st, tight);
+  if (m.count < n * MIN_CLEAR) {
+    const wide = flood(px, w, h, st, tol);
+    if (n - wide.count >= n * MIN_KEEP) m = wide;
   }
   const { bg, count } = m;
   if (count === n) return null;
@@ -124,8 +125,8 @@ export function cutoutWorked(px: Uint8ClampedArray, w: number, h: number): boole
   return clear >= n * MIN_CLEAR;
 }
 
-/** 切り抜く前に縮める大きさ (長辺)。 */
-export const CUT_SIDE = 512;
+/** 切り抜く前に縮める大きさ (長辺)。送る写真と同じ細かさ (iPhone の画素 3 倍の枠でも粗くしない)。 */
+export const CUT_SIDE = 1024; // shrink.ts の MAX_SIDE と同じ (import すると、shrink をモックするテストで読めない)
 
 /** 端末の中の写真 (選んだばかりの写真の下見)。 */
 export const isLocal = (src: string) => src.startsWith("blob:") || src.startsWith("data:");
@@ -171,6 +172,8 @@ async function render(src: string): Promise<Cut> {
     d.done();
     return plain;
   }
+  g.imageSmoothingEnabled = true;
+  g.imageSmoothingQuality = "high";
   g.drawImage(img, 0, 0, w, h);
   d.done();
   const data = g.getImageData(0, 0, w, h);
